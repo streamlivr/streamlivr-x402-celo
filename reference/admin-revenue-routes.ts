@@ -111,7 +111,7 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
         _count: { _all: true },
       }),
       prisma.x402Payment.findMany({ where: { createdAt: inRange }, select: { amountAtomic: true, endpoint: true, payTo: true, network: true, settlementTxHash: true, createdAt: true } }),
-      prisma.x402Attribution.findMany({ where: { createdAt: inRange }, select: { shareAtomic: true } }).catch(() => []),
+      prisma.x402Attribution.findMany({ where: { createdAt: inRange }, select: { shareAtomic: true, payment: { select: { network: true } } } }).catch(() => []),
       prisma.x402SettlementOutbox.groupBy({ by: ['status'], _count: { _all: true } }).catch(() => []),
       prisma.x402Payout.findMany({ where: { createdAt: inRange }, select: { status: true, amountAtomic: true } }).catch(() => []),
       prisma.$queryRaw<Array<{ creatorId: string; username: string | null; displayName: string | null; walletAddress: string | null; attributedAtomic: string; reservedAtomic: string; kycStatus: string | null; bushaCustomerId: string | null; fraudRiskScore: number | null; isFraudSuspended: boolean | null }>>`
@@ -143,6 +143,23 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
 
     const x402Atomic = x402Payments.reduce((sum, payment) => sum + BigInt(payment.amountAtomic), 0n);
     const x402CreatorAtomic = x402Attributions.reduce((sum, attribution) => sum + BigInt(attribution.shareAtomic), 0n);
+    // Sepolia and mainnet settle the same asset symbol but not the same money.
+    // Keeping them in one bucket made test payments read as platform revenue.
+    const x402NetworkTotals = new Map<string, { count: number; gross: bigint; creator: bigint }>();
+    for (const payment of x402Payments) {
+      const row = x402NetworkTotals.get(payment.network) ?? { count: 0, gross: 0n, creator: 0n };
+      row.count += 1;
+      row.gross += BigInt(payment.amountAtomic);
+      x402NetworkTotals.set(payment.network, row);
+    }
+    for (const attribution of x402Attributions) {
+      const network = attribution.payment?.network;
+      if (!network) continue;
+      const row = x402NetworkTotals.get(network) ?? { count: 0, gross: 0n, creator: 0n };
+      row.creator += BigInt(attribution.shareAtomic);
+      x402NetworkTotals.set(network, row);
+    }
+    const x402Mainnet = x402NetworkTotals.get('eip155:42220') ?? { count: 0, gross: 0n, creator: 0n };
     const x402OutboxByStatus = Object.fromEntries(x402Outbox.map((row) => [row.status, row._count._all]));
     const endpointTotals = new Map<string, { count: number; amount: bigint }>();
     for (const row of x402Payments) { const current = endpointTotals.get(row.endpoint) ?? { count: 0, amount: 0n }; current.count += 1; current.amount += BigInt(row.amountAtomic); endpointTotals.set(row.endpoint, current); }
@@ -169,7 +186,9 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
     const subscriptionsUsd = subRevenueRange._sum.subscriptionRevenueUsd ?? 0;
     const boostsUsd = boostAggRange._sum.amountPaidUsd ?? 0;
     const rampFeesUsd = rampRange._sum.platformFeeUsd ?? 0;
-    const x402PlatformUsd = Number(x402Atomic - x402CreatorAtomic) / 1_000_000;
+    // Headline platform revenue counts settled mainnet money only. Sepolia
+    // volume is test data and must not inflate it.
+    const x402PlatformUsd = Number(x402Mainnet.gross - x402Mainnet.creator) / 1_000_000;
     const totalRevenueUsd = giftFeesUsd + subscriptionsUsd + boostsUsd + rampFeesUsd + x402PlatformUsd;
 
     return {
@@ -193,6 +212,25 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
         creatorAttributedUsd: Number(x402CreatorAtomic) / 1_000_000,
         platformAtomic: (x402Atomic - x402CreatorAtomic).toString(),
         platformUsd: x402PlatformUsd,
+        // Mainnet-only slice, the one that represents real money.
+        mainnet: {
+          paymentCount: x402Mainnet.count,
+          grossAtomic: x402Mainnet.gross.toString(),
+          grossUsd: Number(x402Mainnet.gross) / 1_000_000,
+          creatorAttributedAtomic: x402Mainnet.creator.toString(),
+          creatorAttributedUsd: Number(x402Mainnet.creator) / 1_000_000,
+          platformAtomic: (x402Mainnet.gross - x402Mainnet.creator).toString(),
+          platformUsd: x402PlatformUsd,
+        },
+        byNetwork: [...x402NetworkTotals.entries()].map(([network, row]) => ({
+          network,
+          count: row.count,
+          grossAtomic: row.gross.toString(),
+          grossUsd: Number(row.gross) / 1_000_000,
+          creatorAttributedAtomic: row.creator.toString(),
+          creatorAttributedUsd: Number(row.creator) / 1_000_000,
+          platformUsd: Number(row.gross - row.creator) / 1_000_000,
+        })),
         byEndpoint: [...endpointTotals.entries()].map(([endpoint, row]) => ({ endpoint, count: row.count, amountAtomic: row.amount.toString(), amountUsd: Number(row.amount) / 1_000_000 })),
         treasuryReceipts: x402Payments.map((payment) => ({ txHash: payment.settlementTxHash, payTo: payment.payTo, network: payment.network, amountAtomic: payment.amountAtomic, createdAt: payment.createdAt.toISOString() })).slice(0, 100),
         outbox: { pending: x402OutboxByStatus.PENDING ?? 0, retrying: x402OutboxByStatus.RETRYING ?? 0, failed: x402OutboxByStatus.FAILED ?? 0, completed: x402OutboxByStatus.COMPLETED ?? 0 },

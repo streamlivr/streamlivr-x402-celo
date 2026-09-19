@@ -132,6 +132,24 @@ export const x402Env = z.object({
     .transform((v) => v === 'true' || v === '1'),
   /** `auto` resolves the fee-abstraction adapter for the settlement asset. */
   X402_FEE_CURRENCY: optionalText,
+  /**
+   * Public origin used in discovery documents. Defaults to API_PUBLIC_URL, then
+   * to localhost, so the agent card never advertises an unreachable host.
+   */
+  X402_PUBLIC_BASE_URL: optionalText,
+  /** ERC-8004 agent id, so discovery documents can link the registered agent. */
+  ERC8004_AGENT_ID: optionalText,
+  /**
+   * Bazaar discovery declarations ride along in every 402 response. They are
+   * standard x402 extension data and cost nothing, but an operator who needs a
+   * minimal payment payload can switch them off here.
+   */
+  X402_DISCOVERY: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
+  /** Public home page for the agent provider, used in the A2A agent card. */
+  X402_SITE_URL: optionalText,
 });
 
 const parsed = x402Env.parse(process.env);
@@ -173,6 +191,10 @@ export const X402_ATTRIBUTION_CODES: readonly string[] = parseAttributionCodes()
 export const X402_ATTRIBUTION_TAG = parsed.X402_ATTRIBUTION_TAG;
 /** Raw opt-in flag; `x402/kyc.ts` adds the production refusal. */
 export const X402_LOCAL_KYC_OVERRIDE = parsed.X402_LOCAL_KYC_OVERRIDE;
+export const X402_PUBLIC_BASE_URL = parsed.X402_PUBLIC_BASE_URL;
+export const X402_SITE_URL = parsed.X402_SITE_URL;
+export const X402_DISCOVERY = parsed.X402_DISCOVERY;
+export const ERC8004_AGENT_ID = parsed.ERC8004_AGENT_ID;
 
 type ParsedX402Env = z.infer<typeof x402Env>;
 

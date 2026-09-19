@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { UserRole, type X402Payout } from '@prisma/client';
+import { UserRole, type X402Payout, type X402PayoutStatus } from '@prisma/client';
 import { prisma } from '../../config/database.js';
 import { adminAuth, getAdmin, writeAudit } from '../../middleware/adminAuth.js';
-import { X402_ASSET_ADDRESS, X402_ATTRIBUTION_TAG, X402_FEE_CURRENCY, X402_NETWORK } from '../../x402/config.js';
+import { X402_ASSET_ADDRESS, X402_ASSET_DECIMALS, X402_ASSET_SYMBOL, X402_ATTRIBUTION_TAG, X402_FEE_CURRENCY, X402_NETWORK } from '../../x402/config.js';
 import { buildAttributionSuffix } from '../../x402/attribution.js';
 import { computeCreatorBalances, selectPayableCreators } from '../../x402/payoutMath.js';
 import {
@@ -53,11 +53,21 @@ function treasuryClient() {
 export const adminX402Routes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', adminAuth({ minRole: UserRole.ANALYST }));
 
-  app.get('/payouts', async () => {
-    const rows = await prisma.x402Payout.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
+  /**
+   * Payout batches are prepared against whichever network the server was on at
+   * the time, and that value is frozen onto the row. Switching Sepolia to
+   * mainnet leaves older rows behind, so the list is filterable by network and
+   * reports the active one for the UI to compare against.
+   */
+  app.get<{ Querystring: { network?: string } }>('/payouts', async (request) => {
+    const rows = await prisma.x402Payout.findMany({
+      ...(request.query.network ? { where: { network: request.query.network } } : {}),
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
     // The UI hides the local-verify button unless the API says the override is
     // live, so a production deployment never renders it.
-    return { rows, localKycOverrideEnabled: localKycOverrideEnabled() };
+    return { rows, activeNetwork: X402_NETWORK, localKycOverrideEnabled: localKycOverrideEnabled() };
   });
 
   /**
@@ -190,6 +200,18 @@ export const adminX402Routes: FastifyPluginAsync = async (app) => {
         .filter(isPayoutEligible)
         .map((creator) => [creator.id, creator] as const),
     );
+    // Payout rows are keyed by batch, creator and wallet, never by network. After
+    // a switch to mainnet the day's batch key still resolves to rows prepared on
+    // Sepolia, and the update branch used to leave them there, so the queue filled
+    // with rows the server refused to act on. Re-preparing now moves them onto the
+    // live network. Rows that already committed money are reported instead.
+    const COMMITTED: X402PayoutStatus[] = ['APPROVED', 'SUBMITTED', 'CONFIRMED'];
+    const existingRows = await prisma.x402Payout.findMany({
+      where: { batchKey },
+      select: { creatorId: true, walletAddress: true, status: true },
+    });
+    const existingByKey = new Map(existingRows.map((row) => [`${row.creatorId}|${row.walletAddress}`, row]));
+
     const created = [];
     const skipped: Array<{ creatorId: string; username: string | null; outstandingAtomic: string; blockers: PayoutBlocker[]; blockerMessages: string[] }> = [];
     for (const balance of balances) {
@@ -207,7 +229,39 @@ export const adminX402Routes: FastifyPluginAsync = async (app) => {
         });
         continue;
       }
-      created.push(await prisma.x402Payout.upsert({ where: { batchKey_creatorId_walletAddress: { batchKey, creatorId, walletAddress: wallet } }, create: { creatorId, creatorUsername: eligibleById.get(creatorId)?.username ?? balance.username, walletAddress: wallet, network: X402_NETWORK, assetAddress: X402_ASSET_ADDRESS, amountAtomic: balance.outstandingAtomic, batchKey }, update: { amountAtomic: balance.outstandingAtomic, status: 'PENDING', failureReason: null } }));
+      const existing = existingByKey.get(`${creatorId}|${wallet}`);
+      if (existing && COMMITTED.includes(existing.status)) {
+        skipped.push({
+          creatorId,
+          username: eligibleById.get(creatorId)?.username ?? balance.username,
+          outstandingAtomic: balance.outstandingAtomic,
+          blockers: [],
+          blockerMessages: [`Already ${existing.status.toLowerCase()} in batch ${batchKey}. Cancel or reconcile it before re-preparing.`],
+        });
+        continue;
+      }
+      const creatorUsername = eligibleById.get(creatorId)?.username ?? balance.username;
+      created.push(await prisma.x402Payout.upsert({
+        where: { batchKey_creatorId_walletAddress: { batchKey, creatorId, walletAddress: wallet } },
+        create: { creatorId, creatorUsername, walletAddress: wallet, network: X402_NETWORK, assetAddress: X402_ASSET_ADDRESS, assetSymbol: X402_ASSET_SYMBOL, assetDecimals: X402_ASSET_DECIMALS, amountAtomic: balance.outstandingAtomic, batchKey },
+        update: {
+          creatorUsername,
+          network: X402_NETWORK,
+          assetAddress: X402_ASSET_ADDRESS,
+          assetSymbol: X402_ASSET_SYMBOL,
+          assetDecimals: X402_ASSET_DECIMALS,
+          amountAtomic: balance.outstandingAtomic,
+          status: 'PENDING',
+          failureReason: null,
+          // A hash from the previous network would render as a link to a
+          // transaction that does not exist there, so it goes with the row.
+          txHash: null,
+          approvedBy: null,
+          submittedAt: null,
+          confirmedAt: null,
+          attempts: 0,
+        },
+      }));
     }
     await writeAudit(request, { action: 'x402.payout.prepare', metadata: { batchKey, minimumAtomic: minimum.toString(), created: created.length, skipped: skipped.length } });
     return { batchKey, created: created.length, rows: created, skipped };
@@ -216,8 +270,12 @@ export const adminX402Routes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>('/payouts/:id/approve', async (request, reply) => {
     const admin = await getAdmin(request);
     if (!admin || admin.role !== UserRole.SUPER_ADMIN) return reply.status(403).send({ error: 'SUPER_ADMIN required' });
-    const existing = await prisma.x402Payout.findFirst({ where: { id: request.params.id, status: 'PENDING' } });
-    const row = existing ? await prisma.x402Payout.update({ where: { id: existing.id }, data: { status: 'APPROVED', approvedBy: admin.sub } }) : null;
+    // FAILED rows are re-approvable. A broadcast can fail on something as
+    // ordinary as an unfunded treasury, and without this the row was stranded:
+    // approve refused it for not being PENDING, and execute refused it for not
+    // being APPROVED. Nothing moved on chain in that case, so retrying is safe.
+    const existing = await prisma.x402Payout.findFirst({ where: { id: request.params.id, status: { in: ['PENDING', 'FAILED'] } } });
+    const row = existing ? await prisma.x402Payout.update({ where: { id: existing.id }, data: { status: 'APPROVED', approvedBy: admin.sub, failureReason: null } }) : null;
     if (!row) return reply.status(404).send({ error: 'Pending payout not found' });
     await writeAudit(request, { action: 'x402.payout.approve', targetType: 'X402Payout', targetId: row.id, metadata: { amountAtomic: row.amountAtomic, walletAddress: row.walletAddress } });
     return { payout: row };
@@ -237,6 +295,16 @@ export const adminX402Routes: FastifyPluginAsync = async (app) => {
     if (!admin || admin.role !== UserRole.SUPER_ADMIN) return reply.status(403).send({ error: 'SUPER_ADMIN required' });
     const row = await prisma.x402Payout.findUnique({ where: { id: request.params.id } });
     if (!row || row.status !== 'APPROVED') return reply.status(409).send({ error: 'Payout must be approved first' });
+    // The row carries the asset address it was prepared against. Signing it with
+    // a treasury client pointed at another chain would either revert or, worse,
+    // transfer a different token that happens to share that address.
+    if (row.network !== X402_NETWORK) {
+      return reply.status(409).send({
+        error: `Payout was prepared on ${row.network} but this server is on ${X402_NETWORK}. Cancel it and prepare a new batch on the active network.`,
+        payoutNetwork: row.network,
+        activeNetwork: X402_NETWORK,
+      });
+    }
     if (!row.creatorId) return reply.status(409).send({ error: 'Creator account no longer exists; manual review required' });
     const creator = await prisma.user.findUnique({
       where: { id: row.creatorId },
@@ -277,8 +345,12 @@ export const adminX402Routes: FastifyPluginAsync = async (app) => {
           ...(X402_FEE_CURRENCY ? { feeCurrency: X402_FEE_CURRENCY } : {}),
         });
       } catch (error) {
-        // The transfer never left the treasury, so it is safe to release the row.
-        const payout = await prisma.x402Payout.update({ where: { id: row.id }, data: { status: 'FAILED', failureReason: error instanceof Error ? error.message.slice(0, 500) : 'Broadcast failed before submission' } });
+        // The transfer never left the treasury, so the row can be re-approved
+        // and retried. viem's shortMessage carries the useful line; the full
+        // message is a dump of the request arguments and says nothing extra.
+        const short = (error as { shortMessage?: string }).shortMessage;
+        const reason = short ?? (error instanceof Error ? error.message : 'Broadcast failed before submission');
+        const payout = await prisma.x402Payout.update({ where: { id: row.id }, data: { status: 'FAILED', failureReason: reason.slice(0, 500) } });
         return { kind: 'broadcast-failed', payout };
       }
 
@@ -327,6 +399,15 @@ export const adminX402Routes: FastifyPluginAsync = async (app) => {
     const row = await prisma.x402Payout.findUnique({ where: { id: request.params.id } });
     if (!row) return reply.status(404).send({ error: 'Payout not found' });
     if (row.status !== 'SUBMITTED') return reply.status(409).send({ error: 'Only submitted payouts can be reconciled' });
+    // A hash from another chain resolves to nothing here, or to an unrelated
+    // transaction, so reconciliation has to refuse the mismatch outright.
+    if (row.network !== X402_NETWORK) {
+      return reply.status(409).send({
+        error: `Payout was submitted on ${row.network} but this server is on ${X402_NETWORK}. Check it on that network's explorer instead.`,
+        payoutNetwork: row.network,
+        activeNetwork: X402_NETWORK,
+      });
+    }
     const treasury = treasuryClient();
     if (!treasury) return reply.status(503).send({ error: 'Treasury signer is not configured' });
     try {

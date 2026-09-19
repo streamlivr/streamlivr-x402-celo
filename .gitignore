@@ -20,3 +20,10 @@ docs/SUBMISSION-CHECKLIST.md
 
 # Generated wallet files. Keys and seed phrases never belong in a repository.
 .wallets/
+
+# Demo web app build output. The reference server in demo/ keeps its own
+# source; only the Next.js app under demo/web produces these.
+demo/web/.next/
+demo/web/next-env.d.ts
+demo/web/tsconfig.tsbuildinfo
+demo/web/node_modules/

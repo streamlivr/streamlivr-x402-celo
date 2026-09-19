@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "x402:buyer-smoke": "tsx src/scripts/x402-buyer-smoke.ts",
+    "x402:give-feedback": "tsx src/scripts/x402-give-feedback.ts",
+    "x402:agent-status": "tsx src/scripts/celo-agent-status.ts",
     "x402:verify-attribution": "tsx src/scripts/celo-verify-attribution.ts",
     "x402:register-agent": "tsx src/scripts/celo-register-agent.ts"
   },
@@ -17,6 +19,7 @@
     "@celo/attribution-tags": "0.3.0",
     "@x402/core": "^2.25.0",
     "@x402/evm": "^2.25.0",
+    "@x402/extensions": "^2.25.0",
     "@x402/fetch": "^2.25.0",
     "dotenv": "^16.4.0",
     "fastify": "^5.0.0",
