@@ -1,12 +1,18 @@
 'use client';
 
-import { ArrowUpRight, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowUpRight, AlertCircle, Loader2 } from 'lucide-react';
 import { PayloadView } from './PayloadView';
 import { RawInspector } from './RawInspector';
 import { StreamText } from './StreamText';
 import { networkForCaip2, shortAddress, type NetworkKey } from '@/lib/config';
 import { formatUsd } from '@/lib/format';
 import type { Block } from '@/lib/intents';
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
 
 function InvoicePill({ block }: { block: Extract<Block, { kind: 'invoice' }> }) {
   const { terms } = block;
@@ -16,12 +22,12 @@ function InvoicePill({ block }: { block: Extract<Block, { kind: 'invoice' }> }) 
       <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
         <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan-400" />
         <span>
-          Micro-payment terms:{' '}
-          <strong className="font-mono font-medium text-cyan-300">{formatUsd(terms.amount)}</strong> to{' '}
+          Price{' '}
+          <strong className="font-mono font-medium text-cyan-300">{formatUsd(terms.amount)}</strong> USDC to{' '}
           <span className="font-mono text-slate-200">{shortAddress(terms.payTo, 6)}</span>
         </span>
         <span className="text-slate-600">•</span>
-        <span className="font-light text-slate-400">gas covered on Celo</span>
+        <span className="font-light text-slate-400">the buyer pays no gas</span>
       </div>
     </div>
   );
@@ -34,15 +40,24 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
     ? `https://${network === 'mainnet' ? 'celo' : 'celo-sepolia'}.blockscout.com/tx/${hash}`
     : null;
 
+  const credited =
+    block.credited > 1
+      ? ` to ${block.credited} artists`
+      : block.credited === 1
+        ? ' to 1 artist'
+        : '';
+
   return (
     <div className="flex items-center gap-2 pt-1">
       <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
         <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
         <span>
-          Paid <strong className="font-mono font-medium text-cyan-300">{formatUsd(block.amountAtomic)}</strong> to creator
+          Settled{' '}
+          <strong className="font-mono font-medium text-cyan-300">{formatUsd(block.amountAtomic)}</strong> USDC
+          {credited}
         </span>
         <span className="text-slate-600">•</span>
-        <span className="font-mono text-[11px] text-emerald-400">auto-settled in {block.durationMs}ms</span>
+        <span className="font-mono text-[11px] text-emerald-400">in {formatDuration(block.durationMs)}</span>
         {explorerUrl && (
           <>
             <span className="text-slate-600">•</span>
@@ -52,11 +67,36 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
               rel="noopener noreferrer"
               className="inline-flex items-center gap-0.5 text-cyan-300 underline-offset-2 hover:underline"
             >
-              view tx <ArrowUpRight size={10} />
+              view transaction <ArrowUpRight size={10} />
             </a>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Live status line for a request that is still in flight. Settlement on Celo
+ * takes several seconds, and a silent gap that long reads as a hung page, so
+ * the elapsed seconds tick while the agent waits.
+ */
+function ProgressRow({ block }: { block: Extract<Block, { kind: 'progress' }> }) {
+  const [seconds, setSeconds] = useState(() => Math.max(0, Math.round((Date.now() - block.startedAt) / 1000)));
+
+  useEffect(() => {
+    setSeconds(Math.max(0, Math.round((Date.now() - block.startedAt) / 1000)));
+    const timer = setInterval(() => {
+      setSeconds(Math.max(0, Math.round((Date.now() - block.startedAt) / 1000)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [block.startedAt]);
+
+  return (
+    <div className="flex items-center gap-2 pt-0.5 text-[12.5px] text-slate-400">
+      <Loader2 size={13} strokeWidth={2.4} className="animate-spin text-cyan-300" />
+      <span>{block.label}</span>
+      {seconds >= 2 && <span className="font-mono text-[11px] text-slate-500">{seconds}s</span>}
     </div>
   );
 }
@@ -86,17 +126,28 @@ export function ChatBlock({ block, onStreamDone }: { block: Block; onStreamDone:
   if (block.kind === 'invoice') return <InvoicePill block={block} />;
   if (block.kind === 'receipt') return <ReceiptPill block={block} />;
   if (block.kind === 'payload') {
-    return <PayloadView shape={block.shape} data={block.data} />;
+    return <PayloadView shape={block.shape} data={block.data} endpoint={block.endpoint} />;
   }
   if (block.kind === 'raw') return <RawInspector trace={block.trace} label={block.label} />;
+  if (block.kind === 'progress') return <ProgressRow block={block} />;
   return <ErrorCard block={block} />;
 }
 
-export function ThinkingBubble() {
+export function ThinkingBubble({ label }: { label?: string }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm">
-      <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan-400" />
-      <span>Connecting with creator catalog on Celo...</span>
+      <Loader2 size={12} strokeWidth={2.4} className="animate-spin text-cyan-300" />
+      <span>{label ?? 'Working on it...'}</span>
+    </div>
+  );
+}
+
+/** Sits under a turn while the move is still running and nothing else says so. */
+export function WorkingRow({ label }: { label?: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-0.5 text-[12.5px] text-slate-400">
+      <Loader2 size={13} strokeWidth={2.4} className="animate-spin text-cyan-300" />
+      <span>{label ?? 'Still working...'}</span>
     </div>
   );
 }

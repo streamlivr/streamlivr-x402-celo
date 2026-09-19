@@ -57,19 +57,21 @@ export function RawInspector({ trace, label }: { trace: RequestTrace; label: str
   const [tab, setTab] = useState<Tab>('invoice');
 
   const tabs: { id: Tab; title: string; present: boolean }[] = [
-    { id: 'invoice', title: '402 invoice', present: Boolean(trace.raw.challengeHeader) },
-    { id: 'signature', title: 'payment-signature', present: Boolean(trace.raw.signatureHeader) },
-    { id: 'response', title: 'payment-response', present: Boolean(trace.raw.responseHeader) },
-    { id: 'body', title: 'Response body', present: true },
+    { id: 'invoice', title: 'The 402 invoice', present: Boolean(trace.raw.challengeHeader) },
+    { id: 'signature', title: 'What the buyer signed', present: Boolean(trace.raw.signatureHeader) },
+    { id: 'response', title: "The seller's receipt", present: Boolean(trace.raw.responseHeader) },
+    { id: 'body', title: 'The data that was bought', present: true },
   ];
 
-  const active = tabs.find((entry) => entry.id === tab) ?? tabs[0];
+  // Fall back to the first tab that actually has content. Landing on a disabled
+  // tab and reading "header not present" is how a working request looked broken.
+  const active = tabs.find((entry) => entry.id === tab && entry.present) ?? tabs.find((entry) => entry.present) ?? tabs[0];
   const content =
-    tab === 'body'
+    active.id === 'body'
       ? prettyJson(trace.body)
-      : tab === 'invoice'
+      : active.id === 'invoice'
         ? decodeHeader(trace.raw.challengeHeader)
-        : tab === 'signature'
+        : active.id === 'signature'
           ? decodeHeader(trace.raw.signatureHeader)
           : decodeHeader(trace.raw.responseHeader);
 
@@ -87,7 +89,8 @@ export function RawInspector({ trace, label }: { trace: RequestTrace; label: str
           className={cn('shrink-0 text-text-muted transition-transform duration-200 ease-out-quart', open && 'rotate-90')}
         />
         <span className="flex-1 truncate text-[12.5px] font-medium text-text-primary">
-          Raw exchange<span className="ml-2 font-normal text-text-muted">{label}</span>
+          Raw exchange
+          <span className="ml-2 font-normal text-text-muted">{label}</span>
         </span>
         <span className="shrink-0 rounded-full border border-border px-2 py-[3px] text-[11px] text-text-muted">
           {trace.status || 'N/A'} · {trace.durationMs}ms
@@ -125,16 +128,27 @@ export function RawInspector({ trace, label }: { trace: RequestTrace; label: str
             <Code>{content}</Code>
           </div>
 
-          {tab === 'invoice' && (
+          {active.id === 'invoice' && (
             <p className="mt-2 text-[12px] leading-relaxed text-text-muted">
-              The seller publishes price, asset, payee and the EIP-712 domain here. A buyer needs no prior knowledge of
-              this API to pay it.
+              This is the whole negotiation. The seller names the price, the asset, the address that gets paid, and the
+              EIP-712 domain the signature must use. A buyer needs no prior knowledge of this API.
             </p>
           )}
-          {tab === 'signature' && (
+          {active.id === 'signature' && (
             <p className="mt-2 text-[12px] leading-relaxed text-text-muted">
-              An off-chain EIP-3009 authorization. No approval transaction, no gas from the buyer: the facilitator
-              submits it.
+              An off-chain EIP-3009 authorization signed by the buyer. No approval transaction and no gas from the
+              buyer. The facilitator submits it and covers the fee.
+            </p>
+          )}
+          {active.id === 'response' && (
+            <p className="mt-2 text-[12px] leading-relaxed text-text-muted">
+              The seller&apos;s receipt for the request. The transaction hash in here is the settlement, and it is what
+              the explorer link in the chat points at.
+            </p>
+          )}
+          {active.id === 'body' && (
+            <p className="mt-2 text-[12px] leading-relaxed text-text-muted">
+              The exact JSON the seller returned, including the creator ids behind every row.
             </p>
           )}
         </div>

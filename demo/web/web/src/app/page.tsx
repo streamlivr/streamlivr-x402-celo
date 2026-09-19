@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { ArrowUp } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
-import { ChatBlock, ThinkingBubble } from '@/components/ChatBlock';
+import { ChatBlock, ThinkingBubble, WorkingRow } from '@/components/ChatBlock';
 import { Composer } from '@/components/Composer';
 import { useChat } from '@/lib/useChat';
 import { BURNER_PRIVATE_KEY } from '@/lib/config';
@@ -44,6 +44,22 @@ export default function AgentCheckoutPage() {
     });
     return () => cancelAnimationFrame(frame);
   });
+
+  /**
+   * Cover art and audio load after the block renders, so the page is taller a
+   * moment later. Without this the newest line drifts off screen while the
+   * reader is still pinned to the bottom.
+   */
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!pinnedRef.current) return;
+      const bottom = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+      window.scrollTo({ top: bottom, behavior: 'auto' });
+    });
+    observer.observe(document.body);
+    return () => observer.disconnect();
+  }, []);
 
   const sessionSpentAtomic = useMemo(() => getSessionSpentAtomic(), [turns]);
   const sessionSpent = useMemo(() => formatUsd(String(sessionSpentAtomic)), [sessionSpentAtomic]);
@@ -193,7 +209,7 @@ export default function AgentCheckoutPage() {
           </div>
 
           <ol className="flex flex-col space-y-7">
-            {turns.map((turn) =>
+            {turns.map((turn, turnIndex) =>
               turn.role === 'user' ? (
                 <li key={turn.id} className="turn-in flex justify-end items-end gap-2.5">
                   <div className="max-w-md rounded-3xl rounded-br-md border border-white/[0.09] bg-gradient-to-b from-[#1b202c] to-[#151923] px-5 py-3.5 text-[15px] leading-relaxed text-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.25)] sm:max-w-lg">
@@ -215,12 +231,27 @@ export default function AgentCheckoutPage() {
 
                   {/* Assistant Content */}
                   <div className="max-w-2xl flex-1 space-y-3.5">
-                    {turn.blocks.length === 0 && <ThinkingBubble />}
+                    {turn.blocks.length === 0 && <ThinkingBubble label="Sending the request..." />}
                     {turn.blocks.slice(0, turn.revealed).map((block, index) => (
                       <div key={index} className="turn-in">
                         <ChatBlock block={block} onStreamDone={() => markStreamDone(turn.id, index)} />
                       </div>
                     ))}
+                    {/* Keeps a live indicator on screen while the agent is
+                        still working and while the blocks it queued are still
+                        being revealed, so a long answer never looks finished
+                        halfway through. */}
+                    {turnIndex === turns.length - 1 &&
+                      (busy || turn.status !== 'done') &&
+                      turn.blocks[turn.revealed - 1]?.kind !== 'progress' && (
+                        <WorkingRow
+                          label={
+                            busy
+                              ? 'Working on it...'
+                              : `Showing the rest of the response (${turn.revealed} of ${turn.blocks.length})...`
+                          }
+                        />
+                      )}
                   </div>
                 </li>
               ),

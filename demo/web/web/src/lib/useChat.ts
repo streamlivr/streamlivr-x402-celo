@@ -147,16 +147,23 @@ export function useChat(burnerKey: string) {
           setSettledNetwork(block.network);
         }
         setTurns((previous) =>
-          previous.map((turn) =>
-            turn.id === agentTurn.id && turn.role === 'agent'
-              ? {
-                  ...turn,
-                  blocks: [...turn.blocks, block],
-                  revealed: turn.revealed === 0 ? 1 : turn.revealed,
-                  status: 'revealing',
-                }
-              : turn,
-          ),
+          previous.map((turn) => {
+            if (turn.id !== agentTurn.id || turn.role !== 'agent') return turn;
+            const last = turn.blocks[turn.blocks.length - 1];
+            // A status line changes label several times while a request runs.
+            // Replacing the previous one keeps the transcript from filling with
+            // lines that were only true for a second.
+            const blocks =
+              block.kind === 'progress' && last?.kind === 'progress'
+                ? [...turn.blocks.slice(0, -1), block]
+                : [...turn.blocks, block];
+            return {
+              ...turn,
+              blocks,
+              revealed: turn.revealed === 0 ? 1 : turn.revealed,
+              status: 'revealing',
+            };
+          }),
         );
       };
 
@@ -186,19 +193,20 @@ export function useChat(burnerKey: string) {
         setOptions(initialMoves());
       } finally {
         if (watchdog) clearTimeout(watchdog);
-        // A move that emitted nothing (network switch, session reset) still
-        // needs a beat so the turn does not look stuck.
+        // The status line is scaffolding, not part of the answer, so it comes
+        // out of the transcript once the move is finished. A move that emitted
+        // nothing else (network switch, session reset) still needs a beat so
+        // the turn does not look stuck.
         setTurns((previous) =>
-          previous.map((turn) =>
-            turn.id === agentTurn.id && turn.role === 'agent' && turn.blocks.length === 0
-              ? {
-                  ...turn,
-                  blocks: [{ kind: 'text', text: 'Done.' }],
-                  revealed: 1,
-                  status: 'revealing',
-                }
-              : turn,
-          ),
+          previous.map((turn) => {
+            if (turn.id !== agentTurn.id || turn.role !== 'agent') return turn;
+            const blocks = [...turn.blocks];
+            while (blocks.length > 0 && blocks[blocks.length - 1].kind === 'progress') blocks.pop();
+            if (blocks.length === 0) {
+              return { ...turn, blocks: [{ kind: 'text', text: 'Done.' }], revealed: 1, status: 'revealing' };
+            }
+            return { ...turn, blocks, revealed: Math.min(turn.revealed, blocks.length) };
+          }),
         );
         setBusy(false);
       }

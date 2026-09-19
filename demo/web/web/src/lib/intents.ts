@@ -2,6 +2,7 @@
 
 import { MAX_ATOMIC_PER_REQUEST, NETWORKS, NETWORK_ORDER, explorerTx, networkForCaip2, shortAddress, type NetworkKey } from './config';
 import { formatUsd } from './format';
+import { fetchCreators } from './api';
 import {
   fetchAssetBalance,
   fetchNativeBalance,
@@ -16,12 +17,22 @@ import {
 } from './x402pay';
 
 /** How a paid payload should be drawn. Chosen per endpoint, not per response. */
-export type PayloadShape = 'creators' | 'tracks' | 'profile' | 'ping' | 'generic';
+export type PayloadShape = 'creators' | 'tracks' | 'profile' | 'ledger' | 'ping' | 'generic';
 
 export type Block =
   | { kind: 'text'; text: string }
   | { kind: 'invoice'; terms: PaymentTerms; challenge: PaymentChallenge | null }
-  | { kind: 'receipt'; receipt: SettlementReceipt; amountAtomic: string; network: NetworkKey; durationMs: number; endpoint: string }
+  | {
+      kind: 'receipt';
+      receipt: SettlementReceipt;
+      amountAtomic: string;
+      network: NetworkKey;
+      durationMs: number;
+      endpoint: string;
+      /** Creators whose data was served and who now hold a share of this payment. */
+      credited: number;
+    }
+  | { kind: 'progress'; label: string; startedAt: number }
   | { kind: 'payload'; title: string; shape: PayloadShape; data: unknown; endpoint: string }
   | { kind: 'raw'; trace: RequestTrace; label: string }
   | { kind: 'error'; text: string; hint?: string };
@@ -66,6 +77,26 @@ function pick<T>(items: readonly T[]): T {
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Shows what the agent is doing while a slow request is in flight, and moves
+ * the line on as the wait continues. Settlement on Celo takes several seconds,
+ * and a silent gap that long reads as a hung page. Returns a stop function the
+ * caller runs once the await resolves.
+ */
+function stagedProgress(
+  emit: (block: Block) => void,
+  stages: { atMs: number; label: string }[],
+): () => void {
+  const startedAt = Date.now();
+  emit({ kind: 'progress', label: stages[0].label, startedAt });
+  const timers = stages.slice(1).map((stage) =>
+    setTimeout(() => emit({ kind: 'progress', label: stage.label, startedAt }), stage.atMs),
+  );
+  return () => {
+    for (const timer of timers) clearTimeout(timer);
+  };
 }
 
 // ── Payload readers ─────────────────────────────────────────────────────────
@@ -125,8 +156,8 @@ interface EndpointSpec {
   path: string;
   title: string;
   shape: PayloadShape;
-  /** One line describing what is actually being bought. */
-  buys: string;
+  /** Plain-language openings, picked at random so repeat runs don't read canned. */
+  intro: string[];
 }
 
 const ENDPOINTS: Record<'ping' | 'listings' | 'catalog', EndpointSpec> = {
@@ -135,21 +166,30 @@ const ENDPOINTS: Record<'ping' | 'listings' | 'catalog', EndpointSpec> = {
     path: '/api/v1/agent/ping',
     title: 'Payment gate',
     shape: 'ping',
-    buys: 'a liveness check that only answers once money has moved',
+    intro: [
+      'Checking the payment gate. It only answers once a payment settles.',
+      'Calling the liveness route. This one is a pure settlement check.',
+    ],
   },
   listings: {
     id: 'listings',
     path: '/api/v1/agent/listings',
     title: 'Creator listings',
     shape: 'creators',
-    buys: 'public profiles of artists who opted in to agent discovery',
+    intro: [
+      'Looking up artists who opted in to agent access.',
+      'Fetching creator listings. Every artist in the response agreed to appear.',
+    ],
   },
   catalog: {
     id: 'catalog',
     path: '/api/v1/agent/catalog',
     title: 'Music catalog',
     shape: 'tracks',
-    buys: 'track metadata: titles, artists, ISRCs, and which creators own them',
+    intro: [
+      'Pulling the music catalog: cover art, ISRCs, and the artists who own each recording.',
+      'Fetching the catalog. Tracks come back with their artwork and the creators behind them.',
+    ],
   },
 };
 
@@ -163,17 +203,14 @@ const PROFILE_PRICE = '5000';
  * understanding.
  */
 async function buy(ctx: RunContext, emit: (block: Block) => void, spec: EndpointSpec): Promise<MoveOutcome> {
-  emit({
-    kind: 'text',
-    text: pick([
-      `Requesting ${spec.title.toLowerCase()} with no payment header. This is ${spec.buys}.`,
-      `First request goes out unpaid. Testing what the seller asks for: ${spec.title}.`,
-      `Asking for ${spec.title.toLowerCase()} cold, the way any agent would discover it.`,
-      `No wallet signature yet. Just a plain GET, and whatever the server decides to say back.`,
-    ]),
-  });
+  emit({ kind: 'text', text: pick(spec.intro) });
 
+  const stopProbeProgress = stagedProgress(emit, [
+    { atMs: 0, label: `Requesting a price for ${spec.title.toLowerCase()}` },
+    { atMs: 2500, label: 'Still waiting on the seller' },
+  ]);
   const probe = await probeResource(spec.path);
+  stopProbeProgress();
 
   if (probe.status === 0) {
     emit({
@@ -193,23 +230,28 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, spec: Endpoint
       ]),
     });
     emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: probe.body, endpoint: spec.path });
-    return { lastTrace: probe, next: nextMoves(ctx, probe) };
+    // An unpaid 200 still names creators, and the follow-up chips should offer
+    // their profiles the same way a settled response does.
+    const known = extractCreators(probe);
+    const nextKnown = known.length ? known : ctx.knownCreators;
+    return {
+      lastTrace: probe,
+      ...(known.length ? { knownCreators: known } : {}),
+      next: nextMoves({ ...ctx, knownCreators: nextKnown }, probe),
+    };
   }
+
+  const assetName = String((probe.terms?.extra as Record<string, unknown> | undefined)?.name ?? 'USDC');
 
   if (probe.terms) {
     emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge });
     emit({
       kind: 'text',
       text: pick([
-        `HTTP 402. The price is quoted inside the response itself without needing external docs. It requests ${formatUsd(probe.terms.amount)} in ${String(
-          (probe.terms.extra as Record<string, unknown> | undefined)?.name ?? 'the settlement asset',
-        )} on ${NETWORKS[ctx.network].label}.`,
-        `There it is: ${formatUsd(probe.terms.amount)} to ${shortAddress(probe.terms.payTo)}, settled on ${
+        `The seller wants ${formatUsd(probe.terms.amount)} in ${assetName} on ${
           NETWORKS[ctx.network].label
-        }. The signature is EIP-3009, so it costs the buyer no gas.`,
-        `The invoice came back with the request. ${formatUsd(probe.terms.amount)} payable to ${shortAddress(
-          probe.terms.payTo,
-        )}. I sign an authorization, and the facilitator moves the money.`,
+        }, paid to ${shortAddress(probe.terms.payTo)}. Nothing has been signed yet.`,
+        `Price: ${formatUsd(probe.terms.amount)} in ${assetName}. That is the whole negotiation, and it arrived with the 402.`,
       ]),
     });
   } else {
@@ -224,32 +266,69 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, spec: Endpoint
   emit({
     kind: 'text',
     text: pick([
-      'Signing the authorization now. No approval transaction, no gas from me.',
-      'Signing off-chain and retrying the request with the payment header.',
-      'Authorizing the transfer locally. The facilitator pays the gas on Celo.',
+      `Paying it. I sign a ${assetName} authorization with the demo wallet, and the facilitator moves the money.`,
+      `Sending the payment. The signature is off-chain, so the buyer never needs gas.`,
     ]),
   });
 
-  const trace = await paidRequest({
-    path: spec.path,
-    network: ctx.network,
-    burnerKey: ctx.burnerKey,
-    maxAtomicPerRequest: MAX_ATOMIC_PER_REQUEST,
-    terms: probe.terms,
-    challenge: probe.challenge,
-    challengeHeader: probe.raw.challengeHeader,
-  });
+  const stopPayProgress = stagedProgress(emit, [
+    { atMs: 0, label: 'Signing the authorization' },
+    { atMs: 1200, label: `Settling ${formatUsd(probe.terms.amount)} on ${NETWORKS[ctx.network].label}` },
+    { atMs: 7000, label: 'Waiting for the facilitator to confirm' },
+  ]);
+  let trace: RequestTrace;
+  try {
+    trace = await paidRequest({
+      path: spec.path,
+      network: ctx.network,
+      burnerKey: ctx.burnerKey,
+      maxAtomicPerRequest: MAX_ATOMIC_PER_REQUEST,
+      terms: probe.terms,
+      challenge: probe.challenge,
+      challengeHeader: probe.raw.challengeHeader,
+    });
+  } finally {
+    stopPayProgress();
+  }
 
   return finish(ctx, emit, spec, trace);
+}
+
+/**
+ * How many creators this payment credited. The seller records attribution from
+ * the rows it actually served, so this is the number the ledger will show.
+ */
+function creditedCount(trace: RequestTrace, shape: PayloadShape): number {
+  const body = asRecord(trace.body);
+  if (!body) return 0;
+  if (shape === 'profile') return body.id ? 1 : 0;
+  if (Array.isArray(body.creators)) return body.creators.length;
+  if (Array.isArray(body.tracks)) {
+    const ids = new Set<string>();
+    for (const entry of body.tracks) {
+      const row = asRecord(entry);
+      if (row && Array.isArray(row.creatorIds)) {
+        for (const id of row.creatorIds) ids.add(String(id));
+      }
+    }
+    return ids.size;
+  }
+  return 0;
 }
 
 /** Shared tail for every paid call: receipt, payload, commentary. */
 function finish(ctx: RunContext, emit: (block: Block) => void, spec: EndpointSpec, trace: RequestTrace): MoveOutcome {
   if (!trace.ok || !trace.receipt?.success) {
+    const reason = trace.error ?? trace.receipt?.errorReason ?? 'The payment did not settle.';
+    const outOfCredits = /insufficient_credits|settlement funds/i.test(reason);
     emit({
       kind: 'error',
-      text: trace.error ?? trace.receipt?.errorReason ?? 'The payment did not settle.',
-      hint: 'Nothing was charged if there is no transaction hash below.',
+      text: outOfCredits
+        ? "The seller's facilitator is out of settlement credits, so the transfer was refused before it reached the chain."
+        : reason,
+      hint: outOfCredits
+        ? 'Nothing was charged. Top up the seller account at x402.celo.org, then run this again.'
+        : 'Nothing was charged if there is no transaction hash below.',
     });
     if (trace.raw.responseHeader) emit({ kind: 'raw', trace, label: spec.title });
     return { lastTrace: trace, next: nextMoves(ctx, trace) };
@@ -264,45 +343,52 @@ function finish(ctx: RunContext, emit: (block: Block) => void, spec: EndpointSpe
     network: networkForCaip2(trace.receipt.network, ctx.network),
     durationMs: trace.durationMs,
     endpoint: spec.path,
+    credited: creditedCount(trace, spec.shape),
   });
 
   emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: trace.body, endpoint: spec.path });
 
   const rows = countRows(trace);
+  const credits = creditedCount(trace, spec.shape);
+
   if (spec.shape === 'creators') {
     emit({
       kind: 'text',
       text: rows
         ? pick([
-            `${plural(rows, 'creator', 'creators')} came back, and every one of them is now credited with a share of that cent.`,
-            `That is ${plural(rows, 'artist', 'artists')} on the payout ledger. Pick one and I will buy their profile too.`,
-            `${plural(rows, 'listing', 'listings')}. The sellers only appear here because they opted in. Consent is off by default.`,
+            `${plural(rows, 'artist', 'artists')} returned. Each of them now holds a share of that cent, split 60/40 with the platform.`,
+            `${plural(rows, 'creator', 'creators')} returned, and the ledger credited all of them. Only artists who switched listings on can appear here.`,
           ])
         : pick([
-            'The call settled, but no creator has opted in to listings yet, so the list is empty. Consent is per-artist and off by default.',
-            'Empty list. That is the consent gate working: nobody has switched listings on yet.',
+            'The payment settled, but no artist has listings consent switched on yet, so the response is empty.',
+            'Empty list. Consent is per artist and off by default, so nobody is in it yet.',
           ]),
     });
+    if (rows) {
+      emit({
+        kind: 'text',
+        text: 'Pick an artist and I will buy their profile. That route costs half a cent and credits the whole creator share to one person.',
+      });
+    }
   } else if (spec.shape === 'tracks') {
     emit({
       kind: 'text',
       text: rows
         ? pick([
-            `${plural(rows, 'track', 'tracks')}. The 60/40 split is applied per creator behind each row, not per request.`,
-            `${plural(rows, 'track', 'tracks')} returned. Save the ids: buying one back as a profile is a separate payment.`,
-            `Catalog metadata only, no media URLs. ${plural(rows, 'track', 'tracks')}, each mapped to the creators who own it.`,
+            `${plural(rows, 'track', 'tracks')}, credited across ${plural(credits, 'creator', 'creators')}.`,
+            `${plural(rows, 'track', 'tracks')} returned with cover art and the creators who own each one. The 60/40 split runs per creator, not per request.`,
           ])
         : pick([
-            'Nothing in the catalog yet. No track belongs to a creator with catalog consent switched on.',
-            'Empty catalog. Either no music is published, or nobody has granted catalog consent.',
+            'The catalog is empty. No track belongs to an artist with catalog consent switched on.',
+            'Empty catalog. Either nothing is published, or nobody granted catalog consent.',
           ]),
     });
   } else {
     emit({
       kind: 'text',
       text: pick([
-        'Settled. That is the cheapest possible proof that the whole loop works.',
-        'The gate answers 200 only after settlement. A 200 here confirms real on-chain settlement, not just a ping.',
+        'Settled. The route answers 200 only after the transfer lands, so a 200 here is proof the money moved.',
+        'Done. That 200 came back after settlement, not before it.',
       ]),
     });
   }
@@ -322,52 +408,125 @@ async function buyProfile(ctx: RunContext, emit: (block: Block) => void, creator
   emit({
     kind: 'text',
     text: pick([
-      `Buying ${label}'s profile. Route price: $0.005 instead of $0.01.`,
-      `Second purchase, this time a single profile: ${label}.`,
-      `Fetching ${label}. This one is priced per creator, not per catalog page.`,
+      `Buying ${label}'s profile. This route costs half a cent and credits one artist instead of a pool.`,
+      `Fetching ${label}. Single profile, same payment flow, smaller price.`,
     ]),
   });
 
+  const stopProbe = stagedProgress(emit, [{ atMs: 0, label: `Requesting ${label}'s profile` }]);
   const probe = await probeResource(path);
-  if (probe.status !== 402) {
+  stopProbe();
+
+  if (probe.status === 0) {
     emit({
       kind: 'error',
-      text: `${label}'s profile answered ${probe.status}.`,
-      hint:
-        probe.status === 404
-          ? 'That creator has not switched profile consent on, so the route pretends they do not exist.'
-          : 'Nothing to pay, nothing returned.',
+      text: 'The API never answered, so nothing was sent and nothing was paid.',
+      hint: probe.error ?? 'Check that the API base URL is reachable from this browser.',
     });
     return { lastTrace: probe };
   }
 
-  if (probe.terms) emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge });
+  if (probe.status !== 402) {
+    if (probe.status === 404) {
+      emit({
+        kind: 'error',
+        text: `${label}'s profile is not available to agents.`,
+        hint: 'That artist has not switched profile consent on, so the route pretends they do not exist.',
+      });
+      return { lastTrace: probe, next: nextMoves(ctx, probe) };
+    }
+    if (probe.status >= 400) {
+      emit({
+        kind: 'error',
+        text: `${label}'s profile answered ${probe.status}, so there is nothing to show.`,
+      });
+      return { lastTrace: probe, next: nextMoves(ctx, probe) };
+    }
+    // The seller answered without asking for money, which is what a route looks
+    // like when the payment gate is switched off. The profile still renders.
+    emit({ kind: 'payload', title: `${label}'s profile`, shape: 'profile', data: probe.body, endpoint: path });
+    emit({
+      kind: 'text',
+      text: 'That route answered without asking for payment, so nothing was charged for this profile.',
+    });
+    return afterProfile(ctx, emit, creator, label, { lastTrace: probe, next: nextMoves(ctx, probe) });
+  }
 
-  const trace = await paidRequest({
-    path,
-    network: ctx.network,
-    burnerKey: ctx.burnerKey,
-    maxAtomicPerRequest: MAX_ATOMIC_PER_REQUEST,
-    terms: probe.terms,
-    challenge: probe.challenge,
-    challengeHeader: probe.raw.challengeHeader,
-  });
+  if (probe.terms) {
+    emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge });
+    emit({
+      kind: 'text',
+      text: `${formatUsd(probe.terms.amount)} for one profile, paid to ${shortAddress(probe.terms.payTo)}.`,
+    });
+  }
+
+  const stopPay = stagedProgress(emit, [
+    { atMs: 0, label: 'Signing the authorization' },
+    { atMs: 1200, label: 'Settling on Celo' },
+    { atMs: 7000, label: 'Waiting for the facilitator to confirm' },
+  ]);
+  let trace: RequestTrace;
+  try {
+    trace = await paidRequest({
+      path,
+      network: ctx.network,
+      burnerKey: ctx.burnerKey,
+      maxAtomicPerRequest: MAX_ATOMIC_PER_REQUEST,
+      terms: probe.terms,
+      challenge: probe.challenge,
+      challengeHeader: probe.raw.challengeHeader,
+    });
+  } finally {
+    stopPay();
+  }
 
   const outcome = finish(
     ctx,
     emit,
-    { id: 'profile', path, title: `${label}'s profile`, shape: 'profile', buys: 'one public creator profile' },
+    { id: 'profile', path, title: `${label}'s profile`, shape: 'profile', intro: [] },
     trace,
   );
-  if (trace.ok) {
+
+  if (!trace.ok) return outcome;
+  return afterProfile(ctx, emit, creator, label, outcome);
+}
+
+/**
+ * The free ledger read that follows a profile purchase. It answers the question
+ * a buyer asks next: what has this artist actually been paid, and how much is
+ * still sitting in the payout queue. It never fails the profile it follows.
+ */
+async function afterProfile(
+  ctx: RunContext,
+  emit: (block: Block) => void,
+  creator: KnownCreator,
+  label: string,
+  outcome: MoveOutcome,
+): Promise<MoveOutcome> {
+  try {
+    const ledger = await fetchCreators();
     emit({
-      kind: 'text',
-      text: pick([
-        'Attribution for that route goes entirely to the creator without a split pool.',
-        'Single-creator purchase, so the whole creator share lands on one ledger row.',
-      ]),
+      kind: 'payload',
+      title: 'Artist payout ledger',
+      shape: 'ledger',
+      // The whole ledger travels, with the artist just bought pinned to the
+      // top, so the numbers on the card are the live totals rather than a
+      // single row pretending to be one.
+      data: { ...ledger, focusCreatorId: creator.id },
+      endpoint: '/api/v1/agent/demo/creators',
     });
+  } catch {
+    // The profile stands on its own if the free ledger is unavailable.
   }
+
+  emit({
+    kind: 'text',
+    text: pick([
+      `Attribution for this route landed on ${label} alone, so the whole creator share sits under their name.`,
+      'The ledger card is a free read of the same database the payouts run from.',
+    ]),
+  });
+
   return outcome;
 }
 
@@ -406,8 +565,8 @@ const moveQuote: Move = {
     emit({
       kind: 'text',
       text: pick([
-        'Reading the invoice and stopping there. A 402 is free to look at.',
-        'No signature this time: only the terms published by the seller.',
+        'Reading the price without paying. Looking at a 402 costs nothing.',
+        'Quote only this time. No signature, no transfer, just the terms the seller publishes.',
       ]),
     });
     const trace = await probeResource(ENDPOINTS.catalog.path);
@@ -573,7 +732,7 @@ const moveExplain: Move = {
       kind: 'text',
       text: pick([
         'Here is the whole loop, in the order it happens.',
-        'Six steps from a plain GET to settled money.',
+        'Six steps from an unpaid request to settled money.',
       ]),
     });
     emit({
@@ -583,8 +742,8 @@ const moveExplain: Move = {
       endpoint: 'explain',
       data: {
         steps: [
-          'The agent asks for the resource with no payment header.',
-          'The seller answers 402 with the price, the asset, the payee and the EIP-712 domain.',
+          'The agent asks for the resource without paying.',
+          'The seller answers 402 with the price, the asset, the payee, and the EIP-712 domain.',
           'The agent signs a TransferWithAuthorization off-chain. No approval transaction, no gas.',
           'The agent repeats the request with a payment-signature header.',
           'The Celo facilitator verifies, then settles through the token contract. The seller never custodies funds.',
@@ -683,8 +842,11 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
   const moves: Move[] = [];
 
   // A profile purchase is the natural next step, and it is priced differently,
-  // so it leads the list when the response named any creators.
-  for (const creator of ctx.knownCreators.slice(0, 3)) {
+  // so it leads the list when the response named any creators. The one just
+  // bought is skipped: offering an artist's profile back to the buyer who paid
+  // for it reads like the agent was not paying attention.
+  for (const creator of ctx.knownCreators.slice(0, 2)) {
+    if (trace.path === `/api/v1/agent/creator/${creator.id}`) continue;
     const label = creator.displayName ?? creator.username ?? shortAddress(creator.id, 6);
     moves.push({
       id: `profile:${creator.id}`,
@@ -695,14 +857,14 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
     });
   }
 
-  moves.push(moveRaw, moveReplay);
-
-  // Then the standing catalogue, without duplicating anything already offered.
-  const offered = new Set(moves.map((move) => move.id));
-  for (const move of CORE_MOVES) {
-    if (!offered.has(move.id)) moves.push(move);
+  // Then the other paid routes, so the three chips on screen are all things a
+  // buyer would actually want next. The route just used is left out.
+  for (const move of [movePing, moveListings, moveCatalog, moveQuote]) {
+    if (ENDPOINTS[move.id as 'ping' | 'listings' | 'catalog']?.path === trace.path) continue;
+    if (!moves.some((offered) => offered.id === move.id)) moves.push(move);
   }
-  void trace;
+
+  moves.push(moveRaw, moveReplay);
   return moves;
 }
 

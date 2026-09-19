@@ -26,6 +26,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
 import { x402HTTPResourceServer, x402ResourceServer, type HTTPProcessResult, type RoutesConfig } from '@x402/core/server';
+import { decodePaymentResponseHeader } from '@x402/core/http';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { bazaarResourceServerExtension, declareDiscoveryExtension } from '@x402/extensions';
 import { FastifyAdapter } from '../src/x402/fastifyAdapter.js';
@@ -131,6 +132,27 @@ function copyHeaders(reply: { header: (name: string, value: string) => unknown }
   for (const [name, value] of Object.entries(headers ?? {})) reply.header(name, value);
 }
 
+/**
+ * Lifts a failed settlement reason out of the payment-response header.
+ *
+ * x402 reports a rejected settlement there and leaves the body empty, so a
+ * client that reads only the status sees an opaque 402. Passing the reason
+ * through the body is the difference between "it failed" and knowing the
+ * facilitator account needs credits.
+ */
+function failureReasonFromHeaders(headers: Record<string, unknown> | undefined): string | null {
+  const key = Object.keys(headers ?? {}).find((name) => name.toLowerCase() === 'payment-response');
+  const value = key ? headers?.[key] : undefined;
+  const text = Array.isArray(value) ? value[0] : value;
+  if (typeof text !== 'string' || !text) return null;
+  try {
+    const decoded = decodePaymentResponseHeader(text) as { success?: boolean; errorReason?: string };
+    return decoded?.success === false ? decoded.errorReason ?? 'The payment was rejected' : null;
+  } catch {
+    return null;
+  }
+}
+
 function pathOf(request: { url: string }): string {
   return new URL(request.url, 'http://demo.local').pathname;
 }
@@ -214,7 +236,10 @@ async function main() {
     const result = await httpServer.processHTTPRequest({ adapter, path: adapter.getPath(), method: adapter.getMethod(), ...(paymentHeader ? { paymentHeader } : {}) });
     if (result.type === 'payment-error') {
       copyHeaders(reply, result.response.headers);
-      reply.code(result.response.status).send(result.response.body ?? {});
+      const body = result.response.body;
+      const empty = !body || (typeof body === 'object' && Object.keys(body as Record<string, unknown>).length === 0);
+      const reason = empty ? failureReasonFromHeaders(result.response.headers as Record<string, unknown> | undefined) : null;
+      reply.code(result.response.status).send(reason ? { error: 'payment_failed', reason } : body ?? {});
       return;
     }
     if (result.type === 'payment-verified') {
@@ -248,6 +273,11 @@ async function main() {
     copyHeaders(reply, settled.headers);
     if (!settled.success) {
       reply.code(settled.response.status);
+      const reason = failureReasonFromHeaders(settled.headers as Record<string, unknown> | undefined);
+      if (reason) {
+        reply.header('content-type', 'application/json');
+        return JSON.stringify({ error: 'payment_failed', reason });
+      }
       return JSON.stringify(settled.response.body ?? {});
     }
     const txHash = String((settled as { transaction?: string }).transaction ?? 'unknown');

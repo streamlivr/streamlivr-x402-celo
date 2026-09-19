@@ -358,6 +358,12 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     if (receipt?.success) sessionSpentAtomic += Number(terms.amount);
 
     const paid = response.status < 400 && receipt?.success !== false;
+    // The seller puts a rejected settlement reason in the body now, so a
+    // failure reads as something actionable instead of "402".
+    const failureReason =
+      response.status >= 400 && body && typeof body === 'object' && typeof (body as { reason?: unknown }).reason === 'string'
+        ? String((body as { reason?: unknown }).reason)
+        : null;
     return {
       ok: response.status < 400,
       paid,
@@ -376,7 +382,7 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
         requestHeaders: signedHeaders ?? {},
         responseHeaders: headerRecord(response.headers),
       },
-      error: response.status >= 400 ? `seller answered ${response.status}` : undefined,
+      error: response.status >= 400 ? failureReason ?? `seller answered ${response.status}` : undefined,
     };
   } catch (error) {
     return blankTrace(options.path, started, error instanceof Error ? error.message : 'payment failed');

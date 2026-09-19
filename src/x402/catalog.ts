@@ -62,7 +62,7 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       id: 'creator-listings',
       title: 'Creator listings',
       description:
-        'Opted-in Streamlivr creators with public profile fields and follower counts. Every creator in the response is recorded for revenue attribution when the payment settles.',
+        'Opted-in Streamlivr creators with their public profile fields, avatar URL, country and follower counts. Every creator in the response is recorded for revenue attribution when the payment settles.',
       tags: ['x402', 'celo', 'creators', 'discovery'],
       priceAtomic: LISTINGS_PRICE_ATOMIC,
       example: {
@@ -71,8 +71,11 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
             id: 'cmmggbkik0000rqbzontvsy38',
             username: 'grant',
             displayName: 'ekegrant59',
+            bio: 'Afrobeats producer, Lagos',
+            avatarUrl: 'https://assets.example.com/avatars/creator.jpg',
             countryCode: 'NG',
             followerCount: 2,
+            followingCount: 1,
             isVerified: false,
           },
         ],
@@ -84,12 +87,20 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       id: 'music-catalog',
       title: 'Music catalog',
       description:
-        'Opted-in music tracks with title, artist, ISRC, and the creator ids that supplied each track. Matches how the Streamlivr app indexes audio for video, so agent results line up with in-app search.',
+        'Opted-in music tracks with title, artist, ISRC, artwork, a playable preview clip when the source provides one, and the creator ids that supplied each track. Matches how the Streamlivr app indexes audio for video, so agent results line up with in-app search.',
       tags: ['x402', 'celo', 'music', 'catalog'],
       priceAtomic: CATALOG_PRICE_ATOMIC,
       example: {
         tracks: [
-          { id: 'tr_01', title: 'Lagos Nights', artist: 'Ada', isrc: 'NGAAA2600001', creatorIds: ['cr_01'] },
+          {
+            id: 'tr_01',
+            title: 'Lagos Nights',
+            artist: 'Ada',
+            isrc: 'NGAAA2600001',
+            coverUrl: 'https://cdn-images.dzcdn.net/images/cover/example/500x500-000000-80-0-0.jpg',
+            previewUrl: 'https://cdnt-preview.dzcdn.net/api/1/1/example/preview.mp3?hdnea=exp=1790000000~acl=/api/*~hmac=example',
+            creatorIds: ['cr_01'],
+          },
         ],
       },
     },
@@ -111,8 +122,18 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
         id: 'cmmggbkik0000rqbzontvsy38',
         username: 'grant',
         displayName: 'ekegrant59',
+        bio: 'Afrobeats producer, Lagos',
+        avatarUrl: 'https://assets.example.com/avatars/creator.jpg',
         countryCode: 'NG',
+        isVerified: false,
         followerCount: 2,
+        followingCount: 1,
+        createdAt: '2026-01-14T09:20:00.000Z',
+        stats: {
+          publishedVideos: 12,
+          catalogTracks: 4,
+          consent: { listings: true, catalog: true, profile: true },
+        },
       },
     },
   ];

@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Typewriter reveal for agent copy, matching the mobile support chat: text
- * arrives a few characters at a time with a pulsing block cursor at the end
- * until it is complete.
+ * Reveal for agent copy: the answer arrives word by word with a pulsing block
+ * cursor at the end until it is complete.
  *
- * Paced by frames rather than a fixed characters-per-second rate so a long
- * paragraph does not hold the queue noticeably longer than a short one. Under
- * `prefers-reduced-motion` the text is simply present.
+ * The whole reveal is budgeted rather than run at a fixed rate. A one-line
+ * confirmation lands in under a second, and a paragraph takes about two and a
+ * half seconds no matter how many words it holds, so a long answer never holds
+ * the queue noticeably longer than a short one. Under `prefers-reduced-motion`
+ * the text is simply present.
  */
 export function StreamText({ text, onDone }: { text: string; onDone?: () => void }) {
   const [revealed, setRevealed] = useState(0);
@@ -25,19 +26,30 @@ export function StreamText({ text, onDone }: { text: string; onDone?: () => void
       return;
     }
 
-    let frame = 0;
-    let raf = 0;
-    const total = text.length;
-    // ~34 frames is a little over half a second at 60fps.
-    const step = Math.max(1, Math.ceil(total / 34));
+    // Word boundaries carry the spaces, so the reveal can stop mid-sentence
+    // without dropping a character.
+    const boundaries: number[] = [];
+    const pattern = /\S+\s*/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) boundaries.push(match.index + match[0].length);
+    const total = boundaries.at(-1) ?? text.length;
 
-    const tick = () => {
-      frame += 1;
-      const next = Math.min(total, frame * step);
+    const duration = Math.min(2600, Math.max(700, text.length * 12));
+    const startedAt = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const target = progress * total;
+      let next = 0;
+      for (const boundary of boundaries) {
+        if (boundary <= target) next = boundary;
+        else break;
+      }
       setRevealed(next);
-      if (next < total) {
+      if (progress < 1) {
         raf = requestAnimationFrame(tick);
       } else {
+        setRevealed(total);
         doneRef.current?.();
       }
     };
