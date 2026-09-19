@@ -1,0 +1,9 @@
+# Never bake a developer's local env into an image. Coolify supplies the
+# NEXT_PUBLIC_ values as build arguments instead.
+.env.local
+.env*.local
+node_modules
+.next
+tsconfig.tsbuildinfo
+Dockerfile
+.dockerignore
