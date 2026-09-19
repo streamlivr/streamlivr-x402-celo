@@ -1,6 +1,7 @@
 'use client';
 
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, API_REQUEST_HEADERS } from './config';
+import { fetchReadWithRetry } from './x402pay';
 
 /** Shapes returned by the public demo routes added to the Streamlivr API. */
 
@@ -82,10 +83,11 @@ export class DemoApiError extends Error {
 }
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { accept: 'application/json' },
-    signal,
-  });
+  const response = await fetchReadWithRetry(
+    `${API_BASE_URL}${path}`,
+    { headers: { accept: 'application/json', ...API_REQUEST_HEADERS }, ...(signal ? { signal } : {}) },
+    15_000,
+  );
   const text = await response.text();
   let body: unknown = null;
   try {
@@ -114,7 +116,11 @@ export function fetchCreators(signal?: AbortSignal): Promise<CreatorsResponse> {
 /** Health check used by the header pill so the page can say "API unreachable". */
 export async function pingApi(signal?: AbortSignal): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`, { signal, headers: { accept: 'application/json' } });
+    const response = await fetchReadWithRetry(
+      `${API_BASE_URL}/health`,
+      { headers: { accept: 'application/json', ...API_REQUEST_HEADERS }, ...(signal ? { signal } : {}) },
+      10_000,
+    );
     return response.ok;
   } catch {
     return false;

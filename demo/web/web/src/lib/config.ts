@@ -51,6 +51,24 @@ export const NETWORKS: Record<NetworkKey, NetworkProfile> = {
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'https://api.streamlivr.com').replace(/\/$/, '');
 
 /**
+ * ngrok answers browser requests with an HTML warning page unless the request
+ * carries this header, and a page of HTML where JSON was expected looks like a
+ * dead API. The header only goes to ngrok hosts, so every other deployment keeps
+ * simple requests that need no preflight.
+ */
+function tunnelHeaders(baseUrl: string): Record<string, string> {
+  try {
+    return /\.ngrok(-free)?\.(dev|app|io)$/i.test(new URL(baseUrl).hostname)
+      ? { 'ngrok-skip-browser-warning': 'true' }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export const API_REQUEST_HEADERS: Record<string, string> = tunnelHeaders(API_BASE_URL);
+
+/**
  * Burner key. Set NEXT_PUBLIC_BURNER_PRIVATE_KEY to rotate it; the fallback is
  * the committed demo burner, which is why the caps matter.
  */

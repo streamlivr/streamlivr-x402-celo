@@ -4,7 +4,7 @@ import { x402Client, wrapFetchWithPayment, decodePaymentResponseHeader } from '@
 import { decodePaymentRequiredHeader } from '@x402/core/http';
 import { ExactEvmScheme } from '@x402/evm/exact/client';
 import { privateKeyToAccount } from 'viem/accounts';
-import { API_BASE_URL, MAX_ATOMIC_PER_SESSION, NETWORKS, type NetworkKey } from './config';
+import { API_BASE_URL, API_REQUEST_HEADERS, MAX_ATOMIC_PER_SESSION, NETWORKS, type NetworkKey } from './config';
 
 export interface PaymentTerms {
   scheme: string;
@@ -51,6 +51,49 @@ export interface RequestTrace {
     responseHeaders: Record<string, string>;
   };
   error?: string;
+}
+
+/**
+ * Ceilings on how long a request may hang. Without them a dropped tunnel or a
+ * stalled facilitator leaves the demo mid-flight with the composer disabled,
+ * which reads as a broken page rather than a network problem.
+ */
+const PROBE_TIMEOUT_MS = 15_000;
+const PAYMENT_TIMEOUT_MS = 45_000;
+const BALANCE_TIMEOUT_MS = 10_000;
+
+/** Free reads get a couple of extra tries; a paid retry never does. */
+const READ_ATTEMPTS = 3;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch for requests that cost nothing to repeat. A tunnelled or cold API
+ * drops the occasional connection before it answers, and a quote that never
+ * arrives because of one reset connection reads as a broken seller. Only
+ * transport errors are retried; any HTTP status, 402 included, is a real
+ * answer and is returned as-is.
+ */
+export async function fetchReadWithRetry(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+  attempts = READ_ATTEMPTS,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const timeout = AbortSignal.timeout(timeoutMs);
+      const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+      return await fetch(input, { ...init, signal });
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) await delay(300 * (attempt + 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('request failed');
 }
 
 /** Session spend, in atomic units (USDC has 6 decimals, so 10000 = $0.01). */
@@ -113,7 +156,11 @@ function blankTrace(path: string, started: number, error: string): RequestTrace 
 export async function probeResource(path: string): Promise<RequestTrace> {
   const started = Date.now();
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, { headers: { accept: 'application/json' } });
+    const response = await fetchReadWithRetry(
+      `${API_BASE_URL}${path}`,
+      { headers: { accept: 'application/json', ...API_REQUEST_HEADERS } },
+      PROBE_TIMEOUT_MS,
+    );
     const challengeHeader = response.headers.get('payment-required');
     let challenge: PaymentChallenge | null = null;
     if (challengeHeader) {
@@ -187,7 +234,11 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
 
     // No quote supplied: ask for one. This is the 402 round trip.
     if (!terms) {
-      const probe = await fetch(url, { headers: { accept: 'application/json' } });
+      const probe = await fetchReadWithRetry(
+        url,
+        { headers: { accept: 'application/json', ...API_REQUEST_HEADERS } },
+        PROBE_TIMEOUT_MS,
+      );
       challengeHeader = probe.headers.get('payment-required');
       const probeBody = await probe.text();
       if (probe.status !== 402) {
@@ -254,10 +305,19 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
 
     // Capture the retry request so the inspector can show the authorization
     // that was actually signed, not a reconstruction of it.
+    //
+    // The x402 client calls fetch with a Request that already carries the
+    // payment header, so the headers have to be read from the Request before
+    // init is applied. Rebuilding them from init alone silently drops
+    // payment-signature and turns a paid retry into a second unpaid request.
     const recordingFetch: typeof fetch = async (input, init) => {
-      const headers = init?.headers ? Object.fromEntries(new Headers(init.headers).entries()) : {};
-      const response = await fetch(input, init);
-      if (headers['payment-signature'] || headers['x-payment']) signedHeaders = headers;
+      const source = init?.headers ?? (input instanceof Request ? input.headers : undefined);
+      const merged = new Headers(source);
+      for (const [name, value] of Object.entries(API_REQUEST_HEADERS)) merged.set(name, value);
+      const response = await fetch(input, { ...init, headers: merged });
+      if (merged.has('payment-signature') || merged.has('x-payment')) {
+        signedHeaders = Object.fromEntries(merged.entries());
+      }
       return response;
     };
 
@@ -281,7 +341,10 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     client.register(caip2, new ExactEvmScheme(account, { rpcUrl: payingProfile.rpcUrl }));
     const paidFetch = wrapFetchWithPayment(recordingFetch, client);
 
-    const response = await paidFetch(url, { headers: { accept: 'application/json' } });
+    const response = await paidFetch(url, {
+      headers: { accept: 'application/json', ...API_REQUEST_HEADERS },
+      signal: AbortSignal.timeout(PAYMENT_TIMEOUT_MS),
+    });
     const responseHeader = response.headers.get('payment-response');
     let receipt: SettlementReceipt | null = null;
     if (responseHeader) {
@@ -324,16 +387,20 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
 export async function fetchAssetBalance(network: NetworkKey, address: string, asset: `0x${string}`): Promise<string> {
   const profile = NETWORKS[network];
   const data = `0x70a08231${address.replace(/^0x/, '').toLowerCase().padStart(64, '0')}`;
-  const response = await fetch(profile.rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_call',
-      params: [{ to: asset, data }, 'latest'],
-    }),
-  });
+  const response = await fetchReadWithRetry(
+    profile.rpcUrl,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_call',
+        params: [{ to: asset, data }, 'latest'],
+      }),
+    },
+    BALANCE_TIMEOUT_MS,
+  );
   const json = (await response.json()) as { result?: string; error?: { message?: string } };
   if (!json.result) throw new Error(json.error?.message ?? 'balance read failed');
   return BigInt(json.result).toString();
@@ -342,16 +409,20 @@ export async function fetchAssetBalance(network: NetworkKey, address: string, as
 /** Native CELO balance, shown only so the demo can explain who pays gas. */
 export async function fetchNativeBalance(network: NetworkKey, address: string): Promise<string> {
   const profile = NETWORKS[network];
-  const response = await fetch(profile.rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_getBalance',
-      params: [address, 'latest'],
-    }),
-  });
+  const response = await fetchReadWithRetry(
+    profile.rpcUrl,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getBalance',
+        params: [address, 'latest'],
+      }),
+    },
+    BALANCE_TIMEOUT_MS,
+  );
   const json = (await response.json()) as { result?: string };
   return json.result ? BigInt(json.result).toString() : '0';
 }

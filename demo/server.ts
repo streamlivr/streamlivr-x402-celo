@@ -140,6 +140,36 @@ async function main() {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';
 
+  /**
+   * The bundled demo page runs on its own port, so every call it makes is
+   * cross-origin. A browser can read the response body without help, but the
+   * x402 invoice and receipt travel in response headers and stay invisible to
+   * fetch() unless the response names them. Without this hook the page sees a
+   * 402 with no terms and a paid route looks broken from the web while working
+   * fine from curl.
+   */
+  const EXPOSED_PAYMENT_HEADERS = 'payment-required, payment-response, x-payment-required, x-payment-response';
+  const ALLOWED_HEADERS =
+    'content-type, authorization, accept, payment-signature, payment-required, payment-response, x-payment, x-payment-required, x-payment-response, ngrok-skip-browser-warning';
+
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin) {
+      reply.header('access-control-allow-origin', origin);
+      reply.header('vary', 'Origin');
+      reply.header('access-control-allow-credentials', 'true');
+      reply.header('access-control-expose-headers', EXPOSED_PAYMENT_HEADERS);
+    }
+    if (request.method === 'OPTIONS') {
+      reply.header('access-control-allow-methods', 'GET,HEAD,POST,OPTIONS');
+      reply.header(
+        'access-control-allow-headers',
+        (request.headers['access-control-request-headers'] as string | undefined) ?? ALLOWED_HEADERS,
+      );
+      reply.code(204).send();
+    }
+  });
+
   app.get('/healthz', async () => ({ ok: true, x402: X402_ENABLED ? 'enabled' : 'disabled', network: X402_NETWORK, asset: X402_ASSET_SYMBOL }));
 
   /**

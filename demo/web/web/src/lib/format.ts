@@ -49,6 +49,18 @@ export function formatUsd(atomic: string | bigint, decimals = SETTLEMENT_DECIMAL
   });
 }
 
+/**
+ * Wallet balance for the header pill: three decimals at most, trailing zeros
+ * dropped. A one-cent payment has to be visible in the number, which is why a
+ * plain two-decimal currency format is not used here.
+ */
+export function formatTokenBalance(atomic: string | null | undefined, decimals = SETTLEMENT_DECIMALS): string {
+  if (atomic === null || atomic === undefined || atomic === '') return '…';
+  const value = Number(fromAtomic(atomic, decimals));
+  if (!Number.isFinite(value)) return fromAtomic(atomic, decimals);
+  return value.toFixed(3).replace(/\.?0+$/, '') || '0';
+}
+
 export function formatCount(n: number): string {
   return n.toLocaleString('en-US');
 }

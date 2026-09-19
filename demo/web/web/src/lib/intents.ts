@@ -175,6 +175,15 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, spec: Endpoint
 
   const probe = await probeResource(spec.path);
 
+  if (probe.status === 0) {
+    emit({
+      kind: 'error',
+      text: 'The API never answered, so nothing was sent and nothing was paid.',
+      hint: probe.error ?? 'Check that the API base URL is reachable from this browser.',
+    });
+    return { lastTrace: probe, next: nextMoves(ctx, probe) };
+  }
+
   if (probe.status !== 402) {
     emit({
       kind: 'text',
@@ -480,7 +489,7 @@ const moveWallet: Move = {
 const moveSwitch: Move = {
   id: 'switch',
   label: 'Switch network',
-  hint: 'Sepolia and mainnet price differently.',
+  hint: 'Cycles the networks this build is allowed to pay on.',
   group: 'wallet',
   async run(ctx, emit) {
     // Only the networks this build can actually pay on, so a Sepolia-only build

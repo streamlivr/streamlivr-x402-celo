@@ -28,6 +28,9 @@ export interface AgentTurn {
 
 export type Turn = UserTurn | AgentTurn;
 
+/** A hung request must never leave the composer disabled with no way out. */
+const MOVE_WATCHDOG_MS = 60_000;
+
 let counter = 0;
 function nextId(prefix: string): string {
   counter += 1;
@@ -49,8 +52,16 @@ export function useChat(burnerKey: string) {
   const [options, setOptions] = useState<Move[]>(() => initialMoves());
   const [busy, setBusy] = useState(false);
   const [knownCreators, setKnownCreators] = useState<KnownCreator[]>([]);
+  // Bumped whenever a settled payment lands, so the header can re-read the
+  // burner balance at the moment money actually moves.
+  const [settlementCount, setSettlementCount] = useState(0);
+  const [settledNetwork, setSettledNetwork] = useState<NetworkKey>(() => (MAINNET_ENABLED ? 'mainnet' : 'sepolia'));
 
   const activeTurnRef = useRef<string | null>(null);
+  // Text blocks that have finished typing. A text block holds the reveal queue
+  // until it lands here, and keeping the record past that point is what lets a
+  // block that finished before the next one arrived still release the queue.
+  const streamedRef = useRef<Set<string>>(new Set());
   const lastTraceRef = useRef<RequestTrace | null>(null);
   const networkRef = useRef<NetworkKey>(network);
   const knownRef = useRef<KnownCreator[]>([]);
@@ -73,7 +84,29 @@ export function useChat(burnerKey: string) {
     [patchTurn],
   );
 
-  /** Release queued non-text blocks on a short beat so they do not stack up. */
+  /**
+   * Called by the typewriter when a text block finishes. It advances the turn
+   * only when the finished block is still the visible frontier; when it is not,
+   * the release effect below picks the queue up instead.
+   */
+  const markStreamDone = useCallback(
+    (turnId: string, index: number) => {
+      streamedRef.current.add(`${turnId}:${index}`);
+      patchTurn(turnId, (turn) =>
+        turn.revealed === index + 1 && turn.revealed < turn.blocks.length
+          ? { ...turn, revealed: turn.revealed + 1 }
+          : turn,
+      );
+    },
+    [patchTurn],
+  );
+
+  /**
+   * Release queued blocks one at a time, on a short beat so they do not stack
+   * up. A text block holds the queue until its typewriter reports back, which
+   * it may do before or after the next block is emitted. Testing the finished
+   * record rather than the block kind is what keeps both orderings moving.
+   */
   useEffect(() => {
     const active = turns.find((turn) => turn.id === activeTurnRef.current);
     if (!active || active.role !== 'agent') return;
@@ -83,9 +116,11 @@ export function useChat(burnerKey: string) {
       }
       return;
     }
-    const current = active.blocks[active.revealed - 1];
-    if (current && current.kind === 'text') return; // the typewriter calls advance() itself
-    const timer = setTimeout(() => advance(active.id), 240);
+    const index = active.revealed - 1;
+    const current = index >= 0 ? active.blocks[index] : undefined;
+    if (current && current.kind === 'text' && !streamedRef.current.has(`${active.id}:${index}`)) return;
+    const delay = index < 0 || current?.kind === 'text' ? 0 : 240;
+    const timer = setTimeout(() => advance(active.id), delay);
     return () => clearTimeout(timer);
   }, [turns, advance, patchTurn]);
 
@@ -107,6 +142,10 @@ export function useChat(burnerKey: string) {
       setTurns((previous) => [...previous, userTurn, agentTurn]);
 
       const emit = (block: Block) => {
+        if (block.kind === 'receipt') {
+          setSettlementCount((count) => count + 1);
+          setSettledNetwork(block.network);
+        }
         setTurns((previous) =>
           previous.map((turn) =>
             turn.id === agentTurn.id && turn.role === 'agent'
@@ -129,8 +168,13 @@ export function useChat(burnerKey: string) {
         setNetwork: (next) => setNetwork(next),
       };
 
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const stalled = new Promise<never>((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error('That request never came back, so it was stopped.')), MOVE_WATCHDOG_MS);
+      });
+
       try {
-        const outcome = await move.run(context, emit);
+        const outcome = await Promise.race([move.run(context, emit), stalled]);
         if (outcome.knownCreators?.length) setKnownCreators(outcome.knownCreators);
         if (outcome.lastTrace) lastTraceRef.current = outcome.lastTrace;
         setOptions(outcome.next ?? initialMoves());
@@ -141,6 +185,7 @@ export function useChat(burnerKey: string) {
         });
         setOptions(initialMoves());
       } finally {
+        if (watchdog) clearTimeout(watchdog);
         // A move that emitted nothing (network switch, session reset) still
         // needs a beat so the turn does not look stuck.
         setTurns((previous) =>
@@ -163,6 +208,7 @@ export function useChat(burnerKey: string) {
 
   const reset = useCallback(() => {
     activeTurnRef.current = null;
+    streamedRef.current.clear();
     lastTraceRef.current = null;
     setKnownCreators([]);
     setTurns([]);
@@ -177,6 +223,9 @@ export function useChat(burnerKey: string) {
     networkLabel: NETWORKS[network].label,
     send,
     advance,
+    markStreamDone,
+    settlementCount,
+    settledNetwork,
     reset,
   };
 }

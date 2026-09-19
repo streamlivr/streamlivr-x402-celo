@@ -13,15 +13,37 @@ import { getSessionSpentAtomic } from '@/lib/x402pay';
 import type { Move } from '@/lib/intents';
 
 export default function AgentCheckoutPage() {
-  const { turns, options, busy, networkLabel, send, advance, reset } = useChat(BURNER_PRIVATE_KEY);
+  const { turns, options, busy, networkLabel, send, markStreamDone, settlementCount, settledNetwork, reset } =
+    useChat(BURNER_PRIVATE_KEY);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
 
   const [inputQuery, setInputQuery] = useState('');
 
-  // Scroll smoothly when new blocks reveal
+  /**
+   * Follow the conversation as it grows. A smooth scroll gets cancelled by the
+   * next update during the typewriter, so this scrolls instantly and stops
+   * following the moment a reader scrolls up to read back.
+   */
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns]);
+    const onScroll = () => {
+      const distanceFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      pinnedRef.current = distanceFromBottom < 240;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!pinnedRef.current) return;
+    // After layout, so the message that was just added is measured, not the
+    // height the page had one frame earlier.
+    const frame = requestAnimationFrame(() => {
+      const bottom = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+      window.scrollTo({ top: bottom, behavior: 'auto' });
+    });
+    return () => cancelAnimationFrame(frame);
+  });
 
   const sessionSpentAtomic = useMemo(() => getSessionSpentAtomic(), [turns]);
   const sessionSpent = useMemo(() => formatUsd(String(sessionSpentAtomic)), [sessionSpentAtomic]);
@@ -60,6 +82,7 @@ export default function AgentCheckoutPage() {
 
     const targetMove = findMove(query);
     if (targetMove) {
+      pinnedRef.current = true;
       send({ ...targetMove, label: query });
       setInputQuery('');
     }
@@ -72,6 +95,7 @@ export default function AgentCheckoutPage() {
         ? options.find((m) => m.id === moveOrId) || findMove(moveOrId)
         : moveOrId;
     if (move) {
+      pinnedRef.current = true;
       send(customLabel ? { ...move, label: customLabel } : move);
     }
   };
@@ -81,12 +105,16 @@ export default function AgentCheckoutPage() {
     { label: 'Solaris Echoes discography', moveId: 'catalog' },
     { label: 'Meet verified creators on Celo', moveId: 'listings' },
     { label: 'License terms for VIP stems', moveId: 'quote' },
-    { label: 'Test an instant 0.01 CELO payment', moveId: 'ping' },
+    { label: 'Test an instant 0.01 USDC payment', moveId: 'ping' },
   ];
 
   return (
     <div className="bg-ambient-gradient flex min-h-screen flex-col justify-between selection:bg-[#00daf8]/20 selection:text-[#00daf8]">
-      <PageHeader onReset={turns.length > 0 ? reset : undefined} />
+      <PageHeader
+        onReset={turns.length > 0 ? reset : undefined}
+        refreshKey={settlementCount}
+        networkKey={settledNetwork}
+      />
 
       {turns.length === 0 ? (
         /* BEGIN: Empty State (Minimal, Human, Not Bulk, Not Robotic) */
@@ -160,7 +188,7 @@ export default function AgentCheckoutPage() {
           {/* Subtle Session Timestamp */}
           <div className="flex items-center justify-center">
             <span className="rounded-full border border-white/[0.05] bg-white/[0.02] px-3 py-1 text-[11px] font-medium text-slate-400">
-              Today • Direct creator query
+              Today
             </span>
           </div>
 
@@ -190,7 +218,7 @@ export default function AgentCheckoutPage() {
                     {turn.blocks.length === 0 && <ThinkingBubble />}
                     {turn.blocks.slice(0, turn.revealed).map((block, index) => (
                       <div key={index} className="turn-in">
-                        <ChatBlock block={block} onStreamDone={() => advance(turn.id)} />
+                        <ChatBlock block={block} onStreamDone={() => markStreamDone(turn.id, index)} />
                       </div>
                     ))}
                   </div>
