@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: 'Streamlivr x402: Agent Checkout Demo',
   description:
     'Talk to an agent that pays per request on Celo, and watch Streamlivr settle funds directly to creators.',
+  icons: { icon: '/streamlivr-icon.png' },
 };
 
 /**
