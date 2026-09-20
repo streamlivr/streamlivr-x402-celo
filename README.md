@@ -54,9 +54,13 @@ session at these prices. Do not send CELO, because the facilitator pays the tran
 per-request and per-session caps are the actual protection, and they are enforced before a signature
 is created.
 
+Running it against the deployed API needs no CORS setup. The seller accepts `localhost` and
+`127.0.0.1` on any port, so the origin your dev server lands on is already allowed.
+
 If a payment fails, it is almost always one of three things: the wallet is empty, the API base URL
-points somewhere that does not serve these routes, or the API does not allow the page's origin
-through CORS. The page shows the raw headers and the error from each step, so you can see which.
+points somewhere that does not serve these routes, or the seller's facilitator account is out of
+settlement credits. That last one is not something you can fix from here, and the page says so when
+it happens. The raw headers and the error from each step are on screen either way.
 
 ## The reference server
 
