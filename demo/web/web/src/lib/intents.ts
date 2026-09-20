@@ -21,7 +21,17 @@ export type PayloadShape = 'creators' | 'tracks' | 'profile' | 'ledger' | 'ping'
 
 export type Block =
   | { kind: 'text'; text: string }
-  | { kind: 'invoice'; terms: PaymentTerms; challenge: PaymentChallenge | null }
+  | {
+      kind: 'invoice';
+      terms: PaymentTerms;
+      challenge: PaymentChallenge | null;
+      /**
+       * Whether this invoice is about to be paid or was only read. A quote
+       * renders as information; a payable invoice renders as an offer. Showing
+       * the same pill for both is what made a free read look like a charge.
+       */
+      mode: 'payable' | 'quoted';
+    }
   | {
       kind: 'receipt';
       receipt: SettlementReceipt;
@@ -244,7 +254,7 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, spec: Endpoint
   const assetName = String((probe.terms?.extra as Record<string, unknown> | undefined)?.name ?? 'USDC');
 
   if (probe.terms) {
-    emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge });
+    emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge, mode: 'payable' });
     emit({
       kind: 'text',
       text: pick([
@@ -453,7 +463,7 @@ async function buyProfile(ctx: RunContext, emit: (block: Block) => void, creator
   }
 
   if (probe.terms) {
-    emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge });
+    emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge, mode: 'payable' });
     emit({
       kind: 'text',
       text: `${formatUsd(probe.terms.amount)} for one profile, paid to ${shortAddress(probe.terms.payTo)}.`,
@@ -571,7 +581,7 @@ const moveQuote: Move = {
     });
     const trace = await probeResource(ENDPOINTS.catalog.path);
     if (trace.terms) {
-      emit({ kind: 'invoice', terms: trace.terms, challenge: trace.challenge });
+      emit({ kind: 'invoice', terms: trace.terms, challenge: trace.challenge, mode: 'quoted' });
       const extra = (trace.terms.extra ?? {}) as Record<string, unknown>;
       emit({
         kind: 'text',

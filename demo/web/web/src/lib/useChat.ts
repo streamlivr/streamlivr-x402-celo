@@ -193,19 +193,27 @@ export function useChat(burnerKey: string) {
         setOptions(initialMoves());
       } finally {
         if (watchdog) clearTimeout(watchdog);
-        // The status line is scaffolding, not part of the answer, so it comes
-        // out of the transcript once the move is finished. A move that emitted
-        // nothing else (network switch, session reset) still needs a beat so
-        // the turn does not look stuck.
+        // Status lines are scaffolding, not part of the answer, so they come
+        // out of the transcript once the move is finished. Every one of them,
+        // not just the last: a failed payment leaves the line it died on buried
+        // between real blocks, and dropping only the trailing entry stranded it
+        // there with its timer still counting. A move that emitted nothing else
+        // (network switch, session reset) still needs a beat so the turn does
+        // not look stuck.
         setTurns((previous) =>
           previous.map((turn) => {
             if (turn.id !== agentTurn.id || turn.role !== 'agent') return turn;
-            const blocks = [...turn.blocks];
-            while (blocks.length > 0 && blocks[blocks.length - 1].kind === 'progress') blocks.pop();
+            const blocks = turn.blocks.filter((block) => block.kind !== 'progress');
             if (blocks.length === 0) {
               return { ...turn, blocks: [{ kind: 'text', text: 'Done.' }], revealed: 1, status: 'revealing' };
             }
-            return { ...turn, blocks, revealed: Math.min(turn.revealed, blocks.length) };
+            // Count what the reader has already seen, minus the lines just
+            // removed, so clearing one mid-reveal cannot skip the block behind
+            // it or replay one already on screen.
+            const seen = turn.blocks
+              .slice(0, turn.revealed)
+              .filter((block) => block.kind !== 'progress').length;
+            return { ...turn, blocks, revealed: seen };
           }),
         );
         setBusy(false);

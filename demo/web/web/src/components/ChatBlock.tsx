@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowUpRight, AlertCircle, Check, Loader2 } from 'lucide-react';
 import { PayloadView } from './PayloadView';
 import { RawInspector } from './RawInspector';
 import { StreamText } from './StreamText';
@@ -14,20 +14,31 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/**
+ * Two readings of the same numbers. A payable invoice is an offer the buyer is
+ * about to act on. A quoted invoice is just information: the route was read and
+ * left alone. They looked identical before, which made a free read look like a
+ * charge.
+ */
 function InvoicePill({ block }: { block: Extract<Block, { kind: 'invoice' }> }) {
-  const { terms } = block;
+  const { terms, mode } = block;
+  const payable = mode === 'payable';
 
   return (
     <div className="flex items-center gap-2 pt-0.5">
       <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
-        <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-cyan-400" />
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${payable ? 'pulse-dot bg-cyan-400' : 'bg-slate-500'}`}
+        />
         <span>
-          Price{' '}
+          {payable ? 'Price' : 'Quoted at'}{' '}
           <strong className="font-mono font-medium text-cyan-300">{formatUsd(terms.amount)}</strong> USDC to{' '}
           <span className="font-mono text-slate-200">{shortAddress(terms.payTo, 6)}</span>
         </span>
         <span className="text-slate-600">•</span>
-        <span className="font-light text-slate-400">the buyer pays no gas</span>
+        <span className="font-light text-slate-400">
+          {payable ? 'the buyer pays no gas' : 'nothing signed, nothing charged'}
+        </span>
       </div>
     </div>
   );
@@ -81,22 +92,30 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
  * takes several seconds, and a silent gap that long reads as a hung page, so
  * the elapsed seconds tick while the agent waits.
  */
-function ProgressRow({ block }: { block: Extract<Block, { kind: 'progress' }> }) {
+function ProgressRow({ block, live }: { block: Extract<Block, { kind: 'progress' }>; live: boolean }) {
   const [seconds, setSeconds] = useState(() => Math.max(0, Math.round((Date.now() - block.startedAt) / 1000)));
 
   useEffect(() => {
+    // A status line belongs to a request that is still running. Once the move
+    // is over the counter stops, so a failed request cannot leave a timer
+    // ticking in the transcript forever.
     setSeconds(Math.max(0, Math.round((Date.now() - block.startedAt) / 1000)));
+    if (!live) return;
     const timer = setInterval(() => {
       setSeconds(Math.max(0, Math.round((Date.now() - block.startedAt) / 1000)));
     }, 1000);
     return () => clearInterval(timer);
-  }, [block.startedAt]);
+  }, [block.startedAt, live]);
 
   return (
     <div className="flex items-center gap-2 pt-0.5 text-[12.5px] text-slate-400">
-      <Loader2 size={13} strokeWidth={2.4} className="animate-spin text-cyan-300" />
+      {live ? (
+        <Loader2 size={13} strokeWidth={2.4} className="animate-spin text-cyan-300" />
+      ) : (
+        <Check size={13} strokeWidth={2.4} className="text-slate-600" />
+      )}
       <span>{block.label}</span>
-      {seconds >= 2 && <span className="font-mono text-[11px] text-slate-500">{seconds}s</span>}
+      {live && seconds >= 2 && <span className="font-mono text-[11px] text-slate-500">{seconds}s</span>}
     </div>
   );
 }
@@ -115,7 +134,16 @@ function ErrorCard({ block }: { block: Extract<Block, { kind: 'error' }> }) {
   );
 }
 
-export function ChatBlock({ block, onStreamDone }: { block: Block; onStreamDone: () => void }) {
+export function ChatBlock({
+  block,
+  onStreamDone,
+  live,
+}: {
+  block: Block;
+  onStreamDone: () => void;
+  /** False once the move that produced this block has finished. */
+  live: boolean;
+}) {
   if (block.kind === 'text') {
     return (
       <div className="text-[14.5px] font-normal leading-relaxed text-slate-200">
@@ -129,7 +157,7 @@ export function ChatBlock({ block, onStreamDone }: { block: Block; onStreamDone:
     return <PayloadView shape={block.shape} data={block.data} endpoint={block.endpoint} />;
   }
   if (block.kind === 'raw') return <RawInspector trace={block.trace} label={block.label} />;
-  if (block.kind === 'progress') return <ProgressRow block={block} />;
+  if (block.kind === 'progress') return <ProgressRow block={block} live={live} />;
   return <ErrorCard block={block} />;
 }
 

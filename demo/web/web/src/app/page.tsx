@@ -121,7 +121,7 @@ export default function AgentCheckoutPage() {
     { label: 'Solaris Echoes discography', moveId: 'catalog' },
     { label: 'Meet verified creators on Celo', moveId: 'listings' },
     { label: 'License terms for VIP stems', moveId: 'quote' },
-    { label: 'Test an instant 0.01 USDC payment', moveId: 'ping' },
+    { label: 'Test a real 0.01 USDC payment', moveId: 'ping' },
   ];
 
   return (
@@ -146,7 +146,7 @@ export default function AgentCheckoutPage() {
 
           {/* Conversational Subtitle */}
           <p className="mt-3.5 max-w-lg text-center text-[15px] leading-relaxed text-slate-400 sm:text-[16px]">
-            Streamlivr routes micro-royalties straight to creator wallets on Celo in under 200ms with zero gas fees. Explore music rights, artist profiles, and live listings.
+            Every paid answer is split between the artists whose work it used, settled in USDC on Celo. The buyer needs no gas and no account. Ask about music rights, artist profiles, or who is open to agents.
           </p>
 
           {/* Single Master Floating Input Bar */}
@@ -234,7 +234,11 @@ export default function AgentCheckoutPage() {
                     {turn.blocks.length === 0 && <ThinkingBubble label="Sending the request..." />}
                     {turn.blocks.slice(0, turn.revealed).map((block, index) => (
                       <div key={index} className="turn-in">
-                        <ChatBlock block={block} onStreamDone={() => markStreamDone(turn.id, index)} />
+                        <ChatBlock
+                          block={block}
+                          onStreamDone={() => markStreamDone(turn.id, index)}
+                          live={turn.status !== 'done'}
+                        />
                       </div>
                     ))}
                     {/* Keeps a live indicator on screen while the agent is
