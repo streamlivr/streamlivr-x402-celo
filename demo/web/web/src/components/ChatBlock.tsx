@@ -53,9 +53,9 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
 
   const credited =
     block.credited > 1
-      ? ` to ${block.credited} artists`
+      ? ` to ${block.credited} creators`
       : block.credited === 1
-        ? ' to 1 artist'
+        ? ' to 1 creator'
         : '';
 
   return (

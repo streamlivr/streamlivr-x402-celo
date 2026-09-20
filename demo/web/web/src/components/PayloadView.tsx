@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { BadgeCheck, Disc3, ExternalLink, Music2 } from 'lucide-react';
+import { BadgeCheck, Disc3, ExternalLink, Music2, Play } from 'lucide-react';
 import { Avatar } from './ui';
 import { explorerTx, networkForCaip2, shortAddress, type NetworkKey } from '@/lib/config';
 import { formatAmount, formatCount, formatUsd } from '@/lib/format';
@@ -21,8 +21,161 @@ interface CreatorRow {
   stats?: {
     publishedVideos?: number;
     catalogTracks?: number | null;
-    consent?: { listings?: boolean; catalog?: boolean; profile?: boolean };
+    /** `revoked` means the creator opted out of every paid route. */
+    agentAccess?: 'public' | 'revoked';
   };
+}
+
+/** The page metadata every paid list route returns. */
+interface PageMeta {
+  total?: number;
+  limit?: number;
+  returned?: number;
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  truncated?: boolean;
+}
+
+/**
+ * "Showing 50 of 2,431 — 2,381 behind the cursor", above a list.
+ *
+ * The dataset is thousands of rows, so a card that quietly showed fifty of them
+ * would read as "that is all there is". The cursor is named, because it is the
+ * thing the next chip pays for.
+ */
+function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string | null }) {
+  if (!page || typeof page.total !== 'number' || page.total === 0) return null;
+  const returned = page.returned ?? 0;
+  const remaining = Math.max(page.total - returned, 0);
+  return (
+    <p className="px-1 text-[12px] text-slate-500">
+      Showing <span className="tabular text-slate-400">{formatCount(returned)}</span> of{' '}
+      <span className="tabular text-slate-400">{formatCount(page.total)}</span> {noun}
+      {q ? <> matching “{q}”</> : null}
+      {page.hasMore && remaining > 0 ? (
+        <>
+          {' '}
+          — <span className="tabular">{formatCount(remaining)}</span> more behind the cursor, one cent a page.
+        </>
+      ) : (
+        ' — that is the whole result.'
+      )}
+    </p>
+  );
+}
+
+interface PostRow {
+  id?: string;
+  creatorId?: string;
+  title?: string | null;
+  description?: string | null;
+  hashtags?: string[];
+  mediaType?: string;
+  mediaCount?: number;
+  durationSeconds?: number;
+  thumbnailUrl?: string | null;
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  createdAt?: string | null;
+}
+
+/** One public post. Caption, tags, engagement and the creator behind it. */
+function PostCard({ post, index }: { post: PostRow; index: number }) {
+  const title = post.title?.trim() || 'Untitled post';
+  const tags = post.hashtags ?? [];
+  const carousel = post.mediaType === 'PHOTO_CAROUSEL';
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-[0_6px_24px_rgba(0,0,0,0.3)] backdrop-blur-md">
+      <div className="flex gap-3.5 p-3.5 sm:gap-4 sm:p-4">
+        <div className="relative shrink-0">
+          {post.thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={post.thumbnailUrl}
+              alt={`${title} poster`}
+              width={54}
+              height={72}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="h-[72px] w-[54px] rounded-lg object-cover outline outline-1 outline-white/10"
+            />
+          ) : (
+            <div className="flex h-[72px] w-[54px] items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500/20 via-cyan-500/10 to-transparent outline outline-1 outline-white/10">
+              <Play size={16} className="text-cyan-200/70" />
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <p className="truncate text-[14.5px] font-semibold leading-tight text-white">{title}</p>
+            <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 font-mono text-[10.5px] text-slate-400">
+              #{String(index + 1).padStart(2, '0')}
+            </span>
+          </div>
+          {post.description && (
+            <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-slate-400">{post.description}</p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-slate-400">
+            <span>{carousel ? `${post.mediaCount ?? 1} slides` : `${post.durationSeconds ?? 0}s video`}</span>
+            <span className="text-slate-600">•</span>
+            <span className="tabular">{formatCount(post.viewCount ?? 0)} views</span>
+            <span className="text-slate-600">•</span>
+            <span className="tabular">{formatCount(post.likeCount ?? 0)} likes</span>
+            {tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10.5px] text-slate-400">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Free inventory: what there is to buy, and the tags worth searching for. */
+function StatsCard({ data }: { data: Record<string, unknown> }) {
+  const totals = (data.totals ?? {}) as Record<string, number>;
+  const top = (data.top ?? {}) as {
+    countries?: { code: string; creators?: number; count?: number }[];
+    hashtags?: { tag: string; posts?: number; count?: number }[];
+  };
+  return (
+    <div className="space-y-3.5">
+      <div className="grid grid-cols-2 gap-3.5 rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 shadow-sm backdrop-blur-md sm:grid-cols-4">
+        <Stat value={formatCount(totals.creators ?? 0)} label="public creators" />
+        <Stat value={formatCount(totals.posts ?? 0)} label="public posts" />
+        <Stat value={formatCount(totals.tracks ?? 0)} label="tracks" />
+        <Stat value={formatCount(totals.countries ?? 0)} label="countries" />
+      </div>
+      <div className="grid gap-3.5 sm:grid-cols-2">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 shadow-sm backdrop-blur-md">
+          <p className="text-[10.5px] uppercase tracking-wide text-slate-500">Busiest countries</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(top.countries ?? []).slice(0, 8).map((row) => (
+              <span key={row.code} className="rounded border border-cyan-400/20 bg-cyan-400/[0.07] px-1.5 py-0.5 font-mono text-[10.5px] text-cyan-300">
+                {row.code} · {formatCount(row.creators ?? row.count ?? 0)}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 shadow-sm backdrop-blur-md">
+          <p className="text-[10.5px] uppercase tracking-wide text-slate-500">Busiest tags</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(top.hashtags ?? []).slice(0, 8).map((row) => (
+              <span key={row.tag} className="rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10.5px] text-slate-300">
+                #{row.tag} · {formatCount(row.posts ?? row.count ?? 0)}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="px-1 text-[12px] text-slate-500">
+        This read is free: a buyer has to be able to see how much there is before deciding a page is worth a cent.
+      </p>
+    </div>
+  );
 }
 
 /** One row of the live price list the quote move builds. */
@@ -75,7 +228,7 @@ function CoverArt({ src, title, size = 64 }: { src?: string | null; title: strin
 
 function TrackCard({ track, index }: { track: TrackRow; index: number }) {
   const title = track.title ?? 'Untitled track';
-  const artist = track.artist ?? 'Unknown artist';
+  const artist = track.artist ?? 'Unknown creator';
   const creatorCount = track.creatorIds?.length ?? 0;
 
   return (
@@ -107,7 +260,7 @@ function TrackCard({ track, index }: { track: TrackRow; index: number }) {
               <>
                 <span className="text-slate-600">•</span>
                 <span>
-                  {creatorCount === 1 ? 'credited to 1 artist' : `credited to ${creatorCount} artists`}
+                  {creatorCount === 1 ? 'credited to 1 creator' : `credited to ${creatorCount} creators`}
                 </span>
               </>
             )}
@@ -117,7 +270,7 @@ function TrackCard({ track, index }: { track: TrackRow; index: number }) {
       <div className="border-t border-white/[0.05] px-3.5 py-2.5 sm:px-4">
         <span className="flex items-center gap-2 text-[11.5px] text-slate-500">
           <Music2 size={12} />
-          Metadata only: artwork, ISRC, and the artists who own the recording.
+          Metadata only: artwork, ISRC, and the creators who own the recording.
         </span>
       </div>
     </div>
@@ -170,7 +323,7 @@ function Stat({ value, label }: { value: string; label: string }) {
 
 /**
  * The paid profile route. Every field here is public and opted in, and the
- * point of showing the whole row is that a buyer can tell one artist from
+ * point of showing the whole row is that a buyer can tell one creator from
  * another without a second lookup.
  */
 function ProfileCard({ creator }: { creator: CreatorRow }) {
@@ -178,10 +331,6 @@ function ProfileCard({ creator }: { creator: CreatorRow }) {
   const memberSince = creator.createdAt ? new Date(creator.createdAt).getFullYear() : null;
   const joined = memberSince && Number.isFinite(memberSince) ? String(memberSince) : null;
   const stats = creator.stats;
-  const consent = stats?.consent;
-  const openSurfaces = consent
-    ? (['listings', 'catalog', 'profile'] as const).filter((surface) => consent[surface])
-    : [];
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-[0_6px_24px_rgba(0,0,0,0.3)] backdrop-blur-md">
@@ -215,7 +364,7 @@ function ProfileCard({ creator }: { creator: CreatorRow }) {
         {creator.bio ? (
           <p className="mt-3 text-[13.5px] leading-relaxed text-slate-300">{creator.bio}</p>
         ) : (
-          <p className="mt-3 text-[13px] italic text-slate-500">This artist has not written a bio yet.</p>
+          <p className="mt-3 text-[13px] italic text-slate-500">This creator has not written a bio yet.</p>
         )}
         <div className="mt-4 flex gap-7 border-t border-white/[0.06] pt-3.5">
           <Stat value={formatCount(creator.followerCount ?? 0)} label="followers" />
@@ -228,16 +377,12 @@ function ProfileCard({ creator }: { creator: CreatorRow }) {
           )}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/[0.06] pt-3 text-[11.5px] text-slate-500">
-          <span>Agent discovery open on:</span>
-          {openSurfaces.length > 0 ? (
-            openSurfaces.map((surface) => (
-              <span key={surface} className="rounded border border-cyan-400/20 bg-cyan-400/[0.07] px-1.5 py-0.5 font-mono text-[10.5px] text-cyan-300">
-                {surface}
-              </span>
-            ))
-          ) : (
-            <span>profile only</span>
-          )}
+          <span>Agent access:</span>
+          <span className="rounded border border-cyan-400/20 bg-cyan-400/[0.07] px-1.5 py-0.5 font-mono text-[10.5px] text-cyan-300">
+            {stats?.agentAccess === 'revoked' ? 'revoked by creator' : 'public'}
+          </span>
+          <span className="text-slate-600">•</span>
+          <span>public profile fields only</span>
           <span className="text-slate-600">•</span>
           <span className="font-mono text-slate-500">{creator.id ? shortAddress(creator.id, 8) : ''}</span>
         </div>
@@ -248,12 +393,12 @@ function ProfileCard({ creator }: { creator: CreatorRow }) {
 
 /**
  * The free ledger read that runs beside a profile purchase. It answers the
- * question the paid route cannot: what has this artist actually been paid, and
+ * question the paid route cannot: what has this creator actually been paid, and
  * what is still sitting in the payout queue.
  */
 function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: string } }) {
   const focus = ledger.focusCreatorId;
-  // The artist this turn was about is pinned to the top, because the rest of
+  // The creator this turn was about is pinned to the top, because the rest of
   // the ledger is background.
   const rows = [...(ledger.creators ?? [])].sort((a, b) => {
     if (focus) {
@@ -265,7 +410,7 @@ function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-[0_6px_24px_rgba(0,0,0,0.3)] backdrop-blur-md">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <p className="text-[12px] font-medium uppercase tracking-wide text-slate-400">Artist payout ledger</p>
+        <p className="text-[12px] font-medium uppercase tracking-wide text-slate-400">Creator payout ledger</p>
         <span className="font-mono text-[11px] text-slate-500">
           {ledger.split?.creatorBps ? `${ledger.split.creatorBps / 100}/${ledger.split.platformBps / 100} split` : ''}
         </span>
@@ -274,11 +419,11 @@ function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: 
         <Stat value={formatUsd(ledger.totals?.creatorShareAtomic ?? '0')} label="earned" />
         <Stat value={formatUsd(ledger.totals?.paidOutAtomic ?? '0')} label="paid out" />
         <Stat value={formatUsd(ledger.totals?.outstandingAtomic ?? '0')} label="owed" />
-        <Stat value={formatCount(ledger.totals?.creators ?? rows.length)} label="artists" />
+        <Stat value={formatCount(ledger.totals?.creators ?? rows.length)} label="creators" />
       </div>
       {rows.length === 0 ? (
         <p className="px-4 py-4 text-[13px] text-slate-400">
-          No artist has earned anything yet. The first settled payment will create a row here.
+          No creator has earned anything yet. The first settled payment will create a row here.
         </p>
       ) : (
         <ul className="divide-y divide-white/[0.06] px-4">
@@ -295,7 +440,7 @@ function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: 
                   <p className="truncate text-[13.5px] font-medium text-white">
                     {name}
                     {creator.creatorId === focus && (
-                      <span className="ml-2 font-mono text-[10px] uppercase tracking-wide text-cyan-300">this artist</span>
+                      <span className="ml-2 font-mono text-[10px] uppercase tracking-wide text-cyan-300">this creator</span>
                     )}
                   </p>
                   <p className="text-[11.5px] text-slate-500">
@@ -539,29 +684,39 @@ export function PayloadView({
 
   if (shape === 'creators') {
     const creators = (record.creators as CreatorRow[] | undefined) ?? [];
+    const page = record.page as PageMeta | undefined;
+    const q = (record.query as { q?: string | null } | undefined)?.q ?? null;
     if (creators.length === 0) {
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
-          No artist has discovery consent switched on, so the paid response is an empty list. Consent is per artist and
-          off by default.
+          {q
+            ? `No public creator matches “${q}”. The dataset is every public account, so the query is the only filter.`
+            : 'The paid response came back empty. Every public account is available to agents, so this should not happen at this size.'}
         </div>
       );
     }
     return (
-      <div className="divide-y divide-white/[0.06] rounded-2xl border border-white/[0.08] bg-[#10131a]/85 px-4 py-1 shadow-sm backdrop-blur-md">
-        {creators.map((creator, index) => (
-          <CreatorRowView key={creator.id ?? index} creator={creator} />
-        ))}
+      <div className="space-y-2.5">
+        <div className="divide-y divide-white/[0.06] rounded-2xl border border-white/[0.08] bg-[#10131a]/85 px-4 py-1 shadow-sm backdrop-blur-md">
+          {creators.map((creator, index) => (
+            <CreatorRowView key={creator.id ?? index} creator={creator} />
+          ))}
+        </div>
+        <PageNote page={page} noun="creators" q={q} />
       </div>
     );
   }
 
   if (shape === 'tracks') {
     const tracks = (record.tracks as TrackRow[] | undefined) ?? [];
+    const page = record.page as PageMeta | undefined;
+    const q = (record.query as { q?: string | null } | undefined)?.q ?? null;
     if (tracks.length === 0) {
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
-          The catalog is empty. No track belongs to an artist with catalog consent switched on.
+          {q
+            ? `No track matches “${q}”. Titles and creators are matched token by token, so a full song title still finds its row.`
+            : 'The catalog is empty. A track appears here once a public post draws on it.'}
         </div>
       );
     }
@@ -572,12 +727,46 @@ export function PayloadView({
         ))}
         {tracks.length > 4 && (
           <p className="px-1 text-[12px] text-slate-500">
-            {tracks.length - 4} more {tracks.length - 4 === 1 ? 'track is' : 'tracks are'} in the response. The raw
-            panel below has the whole body.
+            {tracks.length - 4} more {tracks.length - 4 === 1 ? 'track is' : 'tracks are'} on this page. The raw panel
+            below has the whole body.
           </p>
         )}
+        <PageNote page={page} noun="tracks" q={q} />
       </div>
     );
+  }
+
+  if (shape === 'posts') {
+    const posts = (record.posts as PostRow[] | undefined) ?? [];
+    const page = record.page as PageMeta | undefined;
+    const q = (record.query as { q?: string | null } | undefined)?.q ?? null;
+    if (posts.length === 0) {
+      return (
+        <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
+          {q
+            ? `No public post matches “${q}”. Captions, descriptions and tags are searched.`
+            : 'No public posts came back from this page.'}
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {posts.slice(0, 4).map((post, index) => (
+          <PostCard key={post.id ?? index} post={post} index={index} />
+        ))}
+        {posts.length > 4 && (
+          <p className="px-1 text-[12px] text-slate-500">
+            {posts.length - 4} more {posts.length - 4 === 1 ? 'post is' : 'posts are'} on this page. The raw panel below
+            has the whole body.
+          </p>
+        )}
+        <PageNote page={page} noun="posts" q={q} />
+      </div>
+    );
+  }
+
+  if (shape === 'stats') {
+    return <StatsCard data={record} />;
   }
 
   if (shape === 'profile') {

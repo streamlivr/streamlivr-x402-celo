@@ -75,13 +75,31 @@ function extractPaymentHeader(params: Record<string, unknown> | undefined): stri
   return value;
 }
 
+/**
+ * Builds the HTTP path for one tool call: the path parameter goes into the URL,
+ * and any declared query parameter (search, pagination) is appended. Query
+ * values are URL-encoded, and an argument the route does not declare is dropped
+ * rather than forwarded, so a caller cannot smuggle in a filter the catalog
+ * never advertised.
+ */
 function buildPath(route: PaidRoute, args: Record<string, unknown>): { path: string; error?: string } {
-  if (!route.pathParam) return { path: route.path };
-  const value = args[route.pathParam.name];
-  if (typeof value !== 'string' || value.trim() === '') {
-    return { path: route.path, error: `Missing required argument "${route.pathParam.name}"` };
+  let path = route.path;
+  if (route.pathParam) {
+    const value = args[route.pathParam.name];
+    if (typeof value !== 'string' || value.trim() === '') {
+      return { path, error: `Missing required argument "${route.pathParam.name}"` };
+    }
+    path = path.replace(`:${route.pathParam.name}`, encodeURIComponent(value));
   }
-  return { path: route.path.replace(`:${route.pathParam.name}`, encodeURIComponent(value)) };
+  const query = new URLSearchParams();
+  for (const param of route.queryParams ?? []) {
+    const value = args[param.name];
+    if (value === undefined || value === null || value === '') continue;
+    if (typeof value !== 'string' && typeof value !== 'number') continue;
+    query.set(param.name, String(value));
+  }
+  const search = query.toString();
+  return { path: search ? `${path}?${search}` : path };
 }
 
 function headerValue(headers: McpForwardResponse['headers'], name: string): string | undefined {

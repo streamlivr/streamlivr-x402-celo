@@ -28,7 +28,7 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18';
 export const AGENT_VERSION = '1.0.0';
 export const AGENT_NAME = 'Streamlivr';
 export const AGENT_DESCRIPTION =
-  'Streamlivr pays creators over x402 on Celo. Agents can discover opted-in creator listings, music catalogs, and creator profiles, and every settled payment is attributed back to the creators who supplied the data.';
+  'Streamlivr pays creators over x402 on Celo. Agents can search and page through every public creator, post and music catalog entry, and every settled payment is attributed back to the creators whose data was served.';
 export const AGENT_PROVIDER = { organization: 'Streamlivr', url: 'https://streamlivr.com' };
 export const AGENT_DOCUMENTATION_URL = 'https://github.com/streamlivr/streamlivr-x402-celo';
 
@@ -96,6 +96,8 @@ export interface PaymentRouteSummary {
   path: string;
   description: string;
   tags: string[];
+  /** Query parameters the route understands. A client cannot guess these from a price. */
+  queryParams: { name: string; description: string; example: string }[];
   price: { amountAtomic: string; amount: string; decimals: number; asset: string; assetAddress: string; network: string; payTo: string };
 }
 
@@ -109,6 +111,7 @@ export function paymentRouteSummary(route: PaidRoute, context: DiscoveryContext)
     path: route.path,
     description: route.description,
     tags: [...route.tags, priceTag(route)],
+    queryParams: (route.queryParams ?? []).map((param) => ({ name: param.name, description: param.description, example: param.example })),
     price: {
       amountAtomic: route.priceAtomic,
       amount: formatAtomic(route.priceAtomic),
@@ -215,6 +218,11 @@ export function buildMcpTools(context: DiscoveryContext): McpToolDefinition[] {
     if (route.pathParam) {
       properties[route.pathParam.name] = { type: 'string', description: route.pathParam.description };
       required.push(route.pathParam.name);
+    }
+    // Search and pagination are part of the tool contract: an agent that cannot
+    // see `q`/`cursor` would pay for the same first page forever.
+    for (const param of route.queryParams ?? []) {
+      properties[param.name] = { type: 'string', description: param.description, examples: [param.example] };
     }
     const inputSchema = { type: 'object', properties, required, additionalProperties: false } as Record<string, unknown>;
     return {

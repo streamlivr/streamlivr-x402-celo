@@ -7,10 +7,11 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChatBlock, ThinkingBubble, WorkingRow } from '@/components/ChatBlock';
 import { Composer } from '@/components/Composer';
 import { useChat } from '@/lib/useChat';
+import { useSuggestions } from '@/lib/useSuggestions';
 import { BURNER_PRIVATE_KEY } from '@/lib/config';
 import { formatUsd } from '@/lib/format';
 import { getSessionSpentAtomic } from '@/lib/x402pay';
-import type { Move } from '@/lib/intents';
+import { interpretQuery, type Move } from '@/lib/intents';
 
 export default function AgentCheckoutPage() {
   const { turns, options, busy, networkLabel, send, markStreamDone, settlementCount, settledNetwork, reset } =
@@ -64,41 +65,13 @@ export default function AgentCheckoutPage() {
   const sessionSpentAtomic = useMemo(() => getSessionSpentAtomic(), [turns]);
   const sessionSpent = useMemo(() => formatUsd(String(sessionSpentAtomic)), [sessionSpentAtomic]);
 
-  // Find move by intent or keyword
-  const findMove = (query: string): Move | undefined => {
-    const q = query.toLowerCase().trim();
-    if (!q) return options.find((m) => m.id === 'listings') || options[0];
-
-    if (q.includes('artist') || q.includes('creator') || q.includes('who') || q.includes('meet') || q.includes('listing')) {
-      return options.find((m) => m.id === 'listings') || options[0];
-    }
-    if (
-      q.includes('music') ||
-      q.includes('catalog') ||
-      q.includes('track') ||
-      q.includes('song') ||
-      q.includes('album') ||
-      q.includes('nate') ||
-      q.includes('dogg') ||
-      q.includes('uzi')
-    ) {
-      return options.find((m) => m.id === 'catalog') || options[0];
-    }
-    if (q.includes('payout') || q.includes('settle') || q.includes('test') || q.includes('ping') || q.includes('payment') || q.includes('celo')) {
-      return options.find((m) => m.id === 'ping') || options[0];
-    }
-    if (q.includes('quote') || q.includes('price') || q.includes('cost') || q.includes('terms') || q.includes('license') || q.includes('royalty')) {
-      return options.find((m) => m.id === 'quote') || options[0];
-    }
-    if (q.includes('wallet') || q.includes('balance') || q.includes('burner') || q.includes('funds')) {
-      return options.find((m) => m.id === 'wallet') || options[0];
-    }
-    if (q.includes('how') || q.includes('work') || q.includes('explain') || q.includes('about')) {
-      return options.find((m) => m.id === 'explain') || options[0];
-    }
-
-    return options.find((m) => m.label.toLowerCase().includes(q)) || options[0];
-  };
+  /**
+   * Typed text is interpreted by the same module the chips use, so the two
+   * cannot disagree about what "amapiano posts" means. A dataset word turns
+   * into a search on that dataset, a question about pricing turns into the
+   * price list, and anything else is treated as a search over public creators.
+   */
+  const findMove = (query: string): Move | undefined => interpretQuery(query, options);
 
   const handlePromptSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -125,16 +98,10 @@ export default function AgentCheckoutPage() {
     }
   };
 
-  // Suggestion prompt pills for the empty state
-  // Each label names something the live catalogue actually contains, so a
-  // reader can tell what they are about to ask for.
-  const emptyStateSuggestions = [
-    { label: 'Music & Me by Nate Dogg', moveId: 'catalog' },
-    { label: 'What You Saying by Lil Uzi Vert', moveId: 'catalog' },
-    { label: 'Which artists accept agents?', moveId: 'listings' },
-    { label: 'What does each route cost?', moveId: 'quote' },
-    { label: 'Test a real 0.01 USDC payment', moveId: 'ping' },
-  ];
+  // Suggestion chips for the empty state. They come from the seller's free
+  // inventory route, so every label names something the catalogue actually
+  // contains; when that route is unavailable the hook keeps its defaults.
+  const { suggestions, live: suggestionsAreLive } = useSuggestions(turns.length === 0);
 
   return (
     <div className="bg-ambient-gradient flex min-h-screen flex-col justify-between selection:bg-[#00daf8]/20 selection:text-[#00daf8]">
@@ -150,15 +117,17 @@ export default function AgentCheckoutPage() {
 
           {/* Clean Human Headline */}
           <h1 className="text-center font-display text-3xl font-bold tracking-tight text-white sm:text-5xl sm:leading-[1.18]">
-            Ask our catalog.{' '}
+            Ask the catalog.{' '}
             <span className="block bg-gradient-to-r from-white via-slate-100 to-[#00daf8] bg-clip-text text-transparent">
-              Every answer pays the artist.
+              Every answer pays the creators.
             </span>
           </h1>
 
           {/* Conversational Subtitle */}
           <p className="mt-3.5 max-w-lg text-center text-[15px] leading-relaxed text-slate-400 sm:text-[16px]">
-            Every paid answer is split between the artists whose work it used, settled in USDC on Celo. The buyer needs no gas and no account. Ask about music rights, artist profiles, or who is open to agents.
+            Thousands of public creators, posts and tracks, sold a page at a time over x402. Every paid answer is
+            split between the creators whose work it used, settled in USDC on Celo, and the buyer needs no gas and no
+            account. Ask about a city, a tag, a track, or what any of it costs.
           </p>
 
           {/* Single Master Floating Input Bar */}
@@ -188,18 +157,34 @@ export default function AgentCheckoutPage() {
 
             {/* Minimal Suggestion Chips (Text-Only, Human, Clean) */}
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              {emptyStateSuggestions.map((item) => (
+              {suggestions.map((item) => (
                 <button
                   key={item.label}
                   type="button"
                   disabled={busy}
-                  onClick={() => handlePickOption(item.moveId, item.label)}
+                  title={item.hint}
+                  onClick={() => {
+                    pinnedRef.current = true;
+                    setInputQuery(item.label);
+                    const move = findMove(item.label);
+                    if (move) {
+                      send({ ...move, label: item.label });
+                      setInputQuery('');
+                    }
+                  }}
                   className="whitespace-nowrap rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-all hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-95 disabled:opacity-40"
                 >
                   {item.label}
                 </button>
               ))}
             </div>
+
+            {suggestionsAreLive && (
+              <p className="mt-2.5 text-center text-[11px] font-light text-slate-500">
+                Suggestions read live from the public inventory: the seller holds thousands of rows, so it is cheaper to
+                ask what is there than to guess.
+              </p>
+            )}
 
             {/* Reassuring Protocol Note */}
             <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11.5px] font-light text-slate-400">

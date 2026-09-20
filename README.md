@@ -1,8 +1,8 @@
 # Streamlivr: agents buy creator data on Celo
 
-Streamlivr is a live-streaming and music app. Artists publish profiles, listings and tracks. This
+Streamlivr is a live-streaming and music app. Creators publish profiles, posts and tracks. This
 repository is the payment layer that sells that public data to software, one HTTP request at a time,
-over x402 on Celo. Money that arrives gets attributed to the artists whose data was served, and
+over x402 on Celo. Money that arrives gets attributed to the creators whose data was served, and
 payouts leave from the Celo wallet the settlements landed in.
 
 Four paid routes, priced at $0.005 or $0.01, settled in USDC through the hosted Celo facilitator. The
@@ -42,9 +42,12 @@ npm install
 npm run dev        # http://localhost:3008
 ```
 
-The page opens on Celo mainnet. Pick a suggestion, or ask for creators or tracks. The chat first
-probes the route and shows the invoice it got back, then signs the authorization in the background
-and repeats the call with the payment header. Nothing pops up, because the burner key lives in the
+The page opens on Celo mainnet. The suggestion chips are read live from the seller's free inventory
+route, so they name tags and countries that are actually in the catalogue. Type a search — a city, a
+tag, a track title and its creator — and the chat picks the dataset, buys one page, and offers the
+next page plus the same query in another dataset as follow-up chips. The chat first probes the route
+and shows the invoice it got back, then signs the authorization in the background and repeats the
+call with the payment header. Nothing pops up, because the burner key lives in the
 bundle. The reply arrives with the settlement transaction hash, and `Payout ledger` in the header
 shows the same payment split 60/40 between the creators and the platform.
 
@@ -54,34 +57,35 @@ session at these prices. Do not send CELO, because the facilitator pays the tran
 per-request and per-session caps are the actual protection, and they are enforced before a signature
 is created.
 
-Running it against the deployed API needs no CORS setup. The seller accepts `localhost` and
-`127.0.0.1` on any port, so the origin your dev server lands on is already allowed.
-
 If a payment fails, it is almost always one of three things: the wallet is empty, the API base URL
-points somewhere that does not serve these routes, or the seller's facilitator account is out of
-settlement credits. That last one is not something you can fix from here, and the page says so when
-it happens. The raw headers and the error from each step are on screen either way.
+points somewhere that does not serve these routes, or the API does not allow the page's origin
+through CORS. The page shows the raw headers and the error from each step, so you can see which.
 
 ## The reference server
 
 `demo/server.ts` is the same flow with an in-memory store instead of a database. Read it if you want
 to see how the seller side is wired: route config, the facilitator client, settlement, replay
-protection and the 60/40 split. It is deliberately small enough to read in one sitting.
+protection and the 60/40 split. The store is generated to production scale from a fixed seed —
+2,400 creators, 6,000 posts, 5,000 tracks — so the search, the cursors and the "50 of 2,431"
+summaries are exercised against a dataset the size of the real one. It is deliberately small enough
+to read in one sitting.
 
 ```bash
 cp .env.example .env
 # set X402_API_KEY and X402_PAY_TO, leave X402_NETWORK=testnet for a first run
 npm install
-npm test           # 66 tests, no network access needed
+npm test           # 84 unit tests, no network access needed
 npm run demo       # seller on http://127.0.0.1:3000
 ```
 
 | Route | Price | Returns | Attribution |
 |---|---:|---|---|
 | `GET /api/v1/agent/ping` | `10000` | Liveness check that proves settlement works | none |
-| `GET /api/v1/agent/listings` | `10000` | Public creator listings | each creator in the response |
-| `GET /api/v1/agent/catalog` | `10000` | Catalog metadata, no media URLs | each creator behind the tracks |
-| `GET /api/v1/agent/creator/:id` | `5000` | One public profile | that creator |
+| `GET /api/v1/agent/listings` | `10000` | Public creator listings, searchable and paged | each creator on the page |
+| `GET /api/v1/agent/posts` | `10000` | Public posts: captions, tags, media, engagement | each creator whose post is on the page |
+| `GET /api/v1/agent/catalog` | `10000` | Catalog metadata with the creators behind each track | each creator behind the tracks on the page |
+| `GET /api/v1/agent/creator/:id` | `5000` | One public profile with their public counts | that creator |
+| `GET /api/v1/agent/stats` | free | How many creators, posts and tracks there are, and the busiest tags | none |
 | `GET /.well-known/agent.json` | free | A2A agent card with prices and the ERC-8004 identity | none |
 | `GET /.well-known/mcp.json` | free | MCP server card listing the same routes as tools | none |
 | `POST /mcp` | paid per tool | MCP JSON-RPC, same prices as the HTTP routes | same as the route called |
@@ -90,6 +94,40 @@ npm run demo       # seller on http://127.0.0.1:3000
 | `GET /demo/settlements` | free | What this process settled, with the split | none |
 | `GET /api/v1/agent/demo/settlements` | free | The same ledger in the shape the demo site renders | none |
 | `GET /api/v1/agent/demo/creators` | free | Per-creator balances for the demo site | none |
+
+### Every public row, one page at a time
+
+The three data routes carry `?q=`, `?limit=` and `?cursor=`, and the price does not change with any
+of them: a page costs one cent whether it returns fifty rows or the maximum two hundred.
+
+```bash
+curl "http://127.0.0.1:3000/api/v1/agent/listings?q=lagos&limit=25"
+```
+
+```json
+{
+  "creators": [{ "id": "cr_01310", "username": "velvet.lagos", "countryCode": "NG" }],
+  "page": { "total": 275, "limit": 25, "returned": 25, "hasMore": true, "nextCursor": "eyJmb2xsb3dlckNvdW50Ijoi…" },
+  "query": { "q": "lagos", "limit": 25 }
+}
+```
+
+- `page.total` is how many rows matched, not how many came back, so a buyer can see the size of the
+  dataset without paying for all of it.
+- `page.nextCursor` is a keyset cursor, not an offset: it carries the sort values of the last row
+  served, so a page stays correct while rows are inserted underneath it and a stale cursor skips
+  forward instead of repeating rows. `src/x402/paging.ts` is the whole implementation, and it is
+  unit tested.
+- `q` is tokenised. Every token has to match some field, which is what makes "music me nate dogg"
+  find a track called *Music & Me* by *Nate Dogg* instead of returning everything containing "me".
+- `limit` is clamped to 200 rather than rejected, so a client that asks for too much still gets an
+  answer it can use.
+
+The dataset is what the app already shows anyone: public accounts, and posts that are published and
+public, with the creators behind them. A creator who revokes agent access is removed from all three
+routes — the profile route answers `404` and their rows disappear from listings, posts and the
+catalog. Emails, phone numbers, wallet addresses, KYC state and private or followers-only content are
+never selected, at any price. `src/x402/access.ts` is the rule, in one file, with tests.
 
 Amounts are strings in token base units. Every supported asset uses 6 decimals, so `10000` is one
 cent.
@@ -127,10 +165,12 @@ The `extra` block is the EIP-712 domain the buyer signs over. Get `name` or `ver
 facilitator refuses the payment, which is why those values live in `src/x402/config.ts` instead of
 being typed at the call site. USDC reports version `2`, USDT and USAT report `1`.
 
-Set `X402_ENABLED=false` and the paid routes answer `200` with `paid: false`. The two well-known
-discovery documents still resolve in that mode, with an empty route list and `paymentEnabled:
-false`; `/mcp` and the reputation read return `404`, because neither can do anything useful without
-settlement.
+Set `X402_ENABLED=false` and the data routes answer unpaid, so the search and pagination contract can
+be read against a running seller without a facilitator key. That is what `npm run demo` does by
+default: it generates 2,400 creators, 6,000 posts and 5,000 tracks at boot, and the bundled chat
+pages through them for free. The two well-known discovery documents still resolve in that mode, with
+an empty route list and `paymentEnabled: false`; `/mcp` and the reputation read return `404`, because
+neither can do anything useful without settlement.
 
 ## What one payment does
 
@@ -148,13 +188,13 @@ settlement.
 Repeat the same signed payload and the stored response comes back instead of a second charge. The
 authorization nonce is single-use, so a second settlement would fail anyway.
 
-## Where artists get paid
+## Where creators get paid
 
-Artists hold a Celo wallet inside the Streamlivr app, on mainnet and Sepolia, holding USDC, USDT and
+Creators hold a Celo wallet inside the Streamlivr app, on mainnet and Sepolia, holding USDC, USDT and
 USDm. Signing goes through a Web3Auth-backed provider, so key material stays on the device.
 
-A payout only goes to an address the artist proved they control. The API issues a nonce-bound
-message, the artist signs it, and the API recovers the signer and stores the checksummed result. One
+A payout only goes to an address the creator proved they control. The API issues a nonce-bound
+message, the creator signs it, and the API recovers the signer and stores the checksummed result. One
 challenge, one use, ten minutes to expire.
 
 Money moves in three steps, never one. A batch is prepared as `PENDING`, approved as a separate act,

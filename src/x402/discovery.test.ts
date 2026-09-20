@@ -30,18 +30,39 @@ describe('paid route catalog', () => {
     expect(routes.map((route) => route.path)).toEqual([
       '/api/v1/agent/ping',
       '/api/v1/agent/listings',
+      '/api/v1/agent/posts',
       '/api/v1/agent/catalog',
       '/api/v1/agent/creator/:id',
     ]);
     expect(routes[0]!.priceAtomic).toBe('12345');
-    expect(Number(routes[3]!.priceAtomic)).toBeLessThan(Number(routes[1]!.priceAtomic));
+    const profile = routes.find((route) => route.id === 'creator-profile')!;
+    const listings = routes.find((route) => route.id === 'creator-listings')!;
+    expect(Number(profile.priceAtomic)).toBeLessThan(Number(listings.priceAtomic));
     expect(routes.every((route) => /^\d+$/.test(route.priceAtomic))).toBe(true);
   });
 
   it('builds route patterns and example paths', () => {
-    const profile = buildPaidRoutes()[3]!;
+    const profile = buildPaidRoutes().find((route) => route.id === 'creator-profile')!;
     expect(routePattern(profile)).toBe('GET /api/v1/agent/creator/:id');
     expect(examplePath(profile)).toBe(`/api/v1/agent/creator/${profile.pathParam?.example}`);
+  });
+
+  it('publishes search and pagination on every list route, and none on the profile', () => {
+    const routes = buildPaidRoutes();
+    for (const route of routes.filter((entry) => ['creator-listings', 'public-posts', 'music-catalog'].includes(entry.id))) {
+      expect(route.queryParams?.map((param) => param.name)).toEqual(['q', 'limit', 'cursor']);
+      expect(examplePath(route)).toContain('?q=');
+    }
+    expect(routes.find((route) => route.id === 'creator-profile')?.queryParams).toBeUndefined();
+    expect(routes.find((route) => route.id === 'x402-ping')?.queryParams).toBeUndefined();
+  });
+
+  it('names the public data rule in the routes an agent reads first', () => {
+    const routes = buildPaidRoutes();
+    for (const route of routes.filter((entry) => entry.queryParams)) {
+      expect(route.description.toLowerCase()).not.toContain('opted-in');
+      expect(route.description.toLowerCase()).toContain('searchable');
+    }
   });
 
   it('formats atomic amounts as decimal prices', () => {
@@ -103,6 +124,13 @@ describe('MCP server card', () => {
     const profile = buildMcpTools(context).find((tool) => tool.name === 'creator_profile');
     expect(profile?.inputSchema).toMatchObject({ type: 'object', required: ['id'], additionalProperties: false });
   });
+
+  it('publishes search and pagination arguments on the list tools', () => {
+    const listings = buildMcpTools(context).find((tool) => tool.name === 'creator_listings');
+    const schema = listings?.inputSchema as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(schema.properties).sort()).toEqual(['cursor', 'limit', 'q']);
+    expect(schema.required).toEqual([]);
+  });
 });
 
 describe('ERC-8004 registration metadata', () => {
@@ -124,6 +152,7 @@ describe('ERC-8004 registration metadata', () => {
     expect(byName.MCP).toBe('https://api.example.com/mcp');
     expect(byName['streamlivr-ping']).toBe('https://api.example.com/api/v1/agent/ping');
     expect(byName['streamlivr-listings']).toBe('https://api.example.com/api/v1/agent/listings');
+    expect(byName['streamlivr-posts']).toBe('https://api.example.com/api/v1/agent/posts');
     expect(byName['streamlivr-catalog']).toBe('https://api.example.com/api/v1/agent/catalog');
     expect(byName['streamlivr-creator-profile']).toContain('/api/v1/agent/creator/');
   });
@@ -198,7 +227,7 @@ describe('MCP handler', () => {
   it('lists the paid tools', async () => {
     const outcome = await handler(async () => ({ status: 200, body: {}, headers: {} }))({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const body = outcome.kind === 'response' ? (outcome.body as any) : {};
-    expect(body.result.tools.map((tool: any) => tool.name)).toEqual(['x402_ping', 'creator_listings', 'music_catalog', 'creator_profile']);
+    expect(body.result.tools.map((tool: any) => tool.name)).toEqual(['x402_ping', 'creator_listings', 'public_posts', 'music_catalog', 'creator_profile']);
   });
 
   it('returns the decoded payment requirements when the route answers 402', async () => {
@@ -232,6 +261,24 @@ describe('MCP handler', () => {
     expect(result.structuredContent.data).toEqual({ creators: [] });
     expect(result.structuredContent.settlement.transaction).toBe(settlement.transaction);
     expect(result.isError).toBe(false);
+  });
+
+  it('forwards declared query parameters and drops undeclared arguments', async () => {
+    let seen: McpForwardRequest | undefined;
+    const forward = async (request: McpForwardRequest) => {
+      seen = request;
+      return { status: 200, body: { creators: [] }, headers: {} };
+    };
+    await handler(forward)({
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'creator_listings', arguments: { q: 'lag os', limit: '25', notDeclared: 'x' } },
+    });
+    expect(seen?.path).toBe('/api/v1/agent/listings?q=lag+os&limit=25');
+
+    await handler(forward)({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'creator_listings', arguments: {} } });
+    expect(seen?.path).toBe('/api/v1/agent/listings');
   });
 
   it('fills the path parameter and rejects a missing one', async () => {

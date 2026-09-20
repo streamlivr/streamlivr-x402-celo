@@ -20,7 +20,7 @@ export function fromAtomic(atomic: string | bigint, decimals = SETTLEMENT_DECIMA
  * Compact display for a ledger row: 12.4k, 3.5, 0.01, 0.003.
  *
  * A creator's share of a one-cent payment is 0.003, so two decimal places would
- * render most of this ledger as `0.00` and quietly misreport every artist.
+ * render most of this ledger as `0.00` and quietly misreport every creator.
  */
 export function formatAmount(atomic: string | bigint, decimals = SETTLEMENT_DECIMALS): string {
   const text = fromAtomic(atomic, decimals);

@@ -47,6 +47,22 @@ export interface SettlementsResponse {
   settlements: LedgerSettlement[];
 }
 
+/**
+ * Free inventory for the dataset the paid routes sell. The demo reads it to
+ * suggest things that are actually in the catalogue ("search amapiano") instead
+ * of guessing, and to show the size of what is behind the paywall before anyone
+ * pays. Older deployments without the route are handled by the caller.
+ */
+export interface StatsResponse {
+  totals: { creators: number; posts: number; tracks: number; countries: number };
+  top: {
+    countries: { code: string; creators?: number; count?: number }[];
+    hashtags: { tag: string; posts?: number; count?: number }[];
+  };
+  sample?: { hashtagsFromPosts: number };
+  generatedAt?: string;
+}
+
 export interface LedgerCreator {
   creatorId: string;
   username: string | null;
@@ -60,7 +76,10 @@ export interface LedgerCreator {
   outstandingAtomic: string;
   salesCount: number;
   lastSaleAt: string | null;
-  consent: { listings: boolean; catalog: boolean; profile: boolean };
+  /** `revoked` means the creator opted out of agent access entirely. */
+  agentAccess?: 'public' | 'revoked';
+  /** Raw per-surface flags, still returned by the API for the payout dashboard. */
+  consent?: { listings: boolean; catalog: boolean; profile: boolean };
 }
 
 export interface CreatorsResponse {
@@ -111,6 +130,10 @@ export function fetchSettlements(signal?: AbortSignal): Promise<SettlementsRespo
 
 export function fetchCreators(signal?: AbortSignal): Promise<CreatorsResponse> {
   return getJson<CreatorsResponse>('/api/v1/agent/demo/creators', signal);
+}
+
+export function fetchStats(signal?: AbortSignal): Promise<StatsResponse> {
+  return getJson<StatsResponse>('/api/v1/agent/stats', signal);
 }
 
 /** Health check used by the header pill so the page can say "API unreachable". */

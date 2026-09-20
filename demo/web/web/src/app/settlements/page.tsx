@@ -100,9 +100,9 @@ export default function SettlementsPage() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-14 pt-5 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-primary">Artist payout ledger</h1>
+            <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-primary">Creator payout ledger</h1>
             <p className="mt-1.5 max-w-[62ch] text-[13.5px] leading-relaxed text-text-secondary">
-              Live record of micropayments delivered to independent artists on Celo. Read straight from the live database: nothing here is replayed or simulated.
+              Live record of micropayments delivered to creators on Celo. Read straight from the live database: nothing here is replayed or simulated.
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -138,7 +138,7 @@ export default function SettlementsPage() {
             brand
             label={`Creator share${split ? ` · ${split.creatorBps / 100}%` : ''}`}
             value={totals ? formatUsd(totals.creatorShareAtomic) : '$0.00'}
-            sub={creatorTotals ? `${formatCount(creatorTotals.creators)} artists` : undefined}
+            sub={creatorTotals ? `${formatCount(creatorTotals.creators)} creators` : undefined}
           />
           <StatTile
             label={`Platform share${split ? ` · ${split.platformBps / 100}%` : ''}`}
@@ -146,7 +146,7 @@ export default function SettlementsPage() {
             sub="retained by Streamlivr"
           />
           <StatTile
-            label="Paid out to artists"
+            label="Paid out to creators"
             value={creatorTotals ? formatUsd(creatorTotals.paidOutAtomic) : '$0.00'}
             sub={creatorTotals ? `${formatUsd(creatorTotals.outstandingAtomic)} outstanding` : undefined}
           />
@@ -251,10 +251,11 @@ export default function SettlementsPage() {
 
         <section className="mt-9">
           <div className="mb-3">
-            <h2 className="text-[15px] font-semibold text-text-primary">Artists and earnings</h2>
+            <h2 className="text-[15px] font-semibold text-text-primary">Creators and earnings</h2>
             <p className="text-[12.5px] text-text-secondary">
-              Everyone an agent can reach, what x402 has paid them, and what is still owed. An artist with consent but
-              no sales appears at zero rather than disappearing.
+              Everyone x402 has paid, and what is still owed. Public data is for sale by default, so the row to look
+              for is the one a creator revoked: it stays listed with its settled history, because a payment that
+              already happened is not undone by a later opt-out.
             </p>
           </div>
 
@@ -264,8 +265,8 @@ export default function SettlementsPage() {
             ) : creators && creators.creators.length === 0 ? (
               <div className="p-4">
                 <EmptyState
-                  title="No artists have opted in yet"
-                  description="Agent-facing creator data is off by default. An artist has to switch consent on in the app before these routes will return them."
+                  title="No creator has been paid yet"
+                  description="Every public account is available to agents, so this list fills the moment the first page is bought. Nothing is hidden behind a consent gate."
                 />
               </div>
             ) : (
@@ -288,9 +289,11 @@ export default function SettlementsPage() {
                     </div>
 
                     <div className="flex shrink-0 flex-wrap items-center gap-1">
-                      {creator.consent.listings && <Pill>listings</Pill>}
-                      {creator.consent.catalog && <Pill>catalog</Pill>}
-                      {creator.consent.profile && <Pill>profile</Pill>}
+                      {creator.agentAccess === 'revoked' ? (
+                        <Pill>revoked</Pill>
+                      ) : (
+                        <Pill>public</Pill>
+                      )}
                     </div>
 
                     <div className="w-24 shrink-0 text-right">
