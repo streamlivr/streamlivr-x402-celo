@@ -126,6 +126,23 @@ function headerRecord(headers: Headers): Record<string, string> {
   return out;
 }
 
+/**
+ * Browser fetch failures surface as terse strings like "Failed to fetch" or
+ * "signal timed out". Those tell a reader nothing, and they were showing up in
+ * the transcript verbatim. Map them to a sentence that says what happened and
+ * what to check.
+ */
+function readableError(error: unknown, timeoutMs: number): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/abort|timed? ?out/i.test(message)) {
+    return `The request got no answer within ${Math.round(timeoutMs / 1000)} seconds.`;
+  }
+  if (/failed to fetch|fetch failed|networkerror|load failed|network request failed/i.test(message)) {
+    return 'The browser could not reach the API. Check the connection and the API base URL.';
+  }
+  return message || 'The request failed before it reached the seller.';
+}
+
 function blankTrace(path: string, started: number, error: string): RequestTrace {
   return {
     ok: false,
@@ -190,7 +207,7 @@ export async function probeResource(path: string): Promise<RequestTrace> {
       },
     };
   } catch (error) {
-    return blankTrace(path, started, error instanceof Error ? error.message : 'Request failed');
+    return blankTrace(path, started, readableError(error, PROBE_TIMEOUT_MS));
   }
 }
 
@@ -385,7 +402,7 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
       error: response.status >= 400 ? failureReason ?? `seller answered ${response.status}` : undefined,
     };
   } catch (error) {
-    return blankTrace(options.path, started, error instanceof Error ? error.message : 'payment failed');
+    return blankTrace(options.path, started, readableError(error, PAYMENT_TIMEOUT_MS));
   }
 }
 
