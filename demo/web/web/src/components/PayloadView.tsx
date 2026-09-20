@@ -25,6 +25,14 @@ interface CreatorRow {
   };
 }
 
+/** One row of the live price list the quote move builds. */
+interface QuoteRow {
+  path: string;
+  returns: string;
+  /** Dollar string from the route's own 402, or null when it did not answer. */
+  price: string | null;
+}
+
 interface TrackRow {
   id?: string;
   title?: string;
@@ -345,6 +353,63 @@ function PingCard({ data, network }: { data: Record<string, unknown>; network: N
   );
 }
 
+/**
+ * Every price, read from each route's own 402. Same table shape as the route
+ * list, except the numbers are live and the footer carries the settlement
+ * facts a buyer needs before signing anything.
+ */
+function QuotesCard({ data }: { data: Record<string, unknown> }) {
+  const rows = (data.rows as QuoteRow[] | undefined) ?? [];
+  const settlement = (data.settlement as Record<string, unknown> | null | undefined) ?? null;
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] text-slate-400">
+        No route returned a price.
+      </div>
+    );
+  }
+
+  const facts = settlement
+    ? Object.entries(settlement).filter(([, value]) => value !== null && value !== undefined && value !== '')
+    : [];
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-sm backdrop-blur-md">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="border-b border-white/[0.06] text-[10.5px] uppercase tracking-wide text-slate-500">
+            <th className="px-4 py-2.5 font-medium">Route</th>
+            <th className="px-4 py-2.5 font-medium">Price</th>
+            <th className="hidden px-4 py-2.5 font-medium sm:table-cell">Returns</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.05]">
+          {rows.map((row) => (
+            <tr key={row.path}>
+              <td className="px-4 py-2.5 font-mono text-[12px] text-slate-200">{row.path}</td>
+              <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12px] text-cyan-300">
+                {row.price ?? <span className="text-slate-500">no answer</span>}
+              </td>
+              <td className="hidden px-4 py-2.5 text-[12px] text-slate-400 sm:table-cell">{row.returns}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {facts.length > 0 && (
+        <dl className="flex flex-wrap gap-x-6 gap-y-2 border-t border-white/[0.06] px-4 py-3">
+          {facts.map(([key, value]) => (
+            <div key={key}>
+              <dt className="text-[10.5px] uppercase tracking-wide text-slate-500">{key}</dt>
+              <dd className="mt-0.5 font-mono text-[12px] text-slate-300">{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 function RoutesCard({ routes, note }: { routes: { path: string; price: string; returns: string }[]; note?: string }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-sm backdrop-blur-md">
@@ -521,6 +586,10 @@ export function PayloadView({
 
   if (shape === 'ledger') {
     return <LedgerCard ledger={record as unknown as CreatorsResponse} />;
+  }
+
+  if (shape === 'quotes') {
+    return <QuotesCard data={record} />;
   }
 
   if (shape === 'ping') {

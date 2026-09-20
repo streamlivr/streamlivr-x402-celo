@@ -17,7 +17,7 @@ import {
 } from './x402pay';
 
 /** How a paid payload should be drawn. Chosen per endpoint, not per response. */
-export type PayloadShape = 'creators' | 'tracks' | 'profile' | 'ledger' | 'ping' | 'generic';
+export type PayloadShape = 'creators' | 'tracks' | 'profile' | 'ledger' | 'ping' | 'quotes' | 'generic';
 
 export type Block =
   | { kind: 'text'; text: string }
@@ -566,38 +566,95 @@ const moveCatalog: Move = {
   run: (ctx, emit) => buy(ctx, emit, ENDPOINTS.catalog),
 };
 
+/** Routes the price list reads. The profile route joins it once an artist is known. */
+const QUOTE_ROUTES: { path: string; returns: string }[] = [
+  { path: '/api/v1/agent/ping', returns: 'Settlement liveness check' },
+  { path: '/api/v1/agent/listings', returns: 'Artist profiles' },
+  { path: '/api/v1/agent/catalog', returns: 'Track metadata and owners' },
+];
+
+/**
+ * Every price at once, read straight off each route's 402. Nothing is signed,
+ * so this costs nothing and it answers the question a buyer actually arrives
+ * with: what does this seller charge, per route.
+ */
 const moveQuote: Move = {
   id: 'quote',
-  label: 'Quote only',
-  hint: 'Read the 402 and stop.',
+  label: 'All prices',
+  hint: 'Read every invoice. Nothing is signed.',
   group: 'inspect',
-  async run(_ctx, emit) {
+  async run(ctx, emit) {
     emit({
       kind: 'text',
       text: pick([
-        'Reading the price without paying. Looking at a 402 costs nothing.',
-        'Quote only this time. No signature, no transfer, just the terms the seller publishes.',
+        'Reading every price. Looking at a 402 is free, so nothing is signed and nothing is charged.',
+        'Price list, read live. These are the invoices each route returns to an unpaid request.',
       ]),
     });
-    const trace = await probeResource(ENDPOINTS.catalog.path);
-    if (trace.terms) {
-      emit({ kind: 'invoice', terms: trace.terms, challenge: trace.challenge, mode: 'quoted' });
-      const extra = (trace.terms.extra ?? {}) as Record<string, unknown>;
-      emit({
-        kind: 'text',
-        text: pick([
-          `That is the entire negotiation. ${
-            extra.name ? String(extra.name) : 'The asset'
-          }, version ${extra.version ? String(extra.version) : 'N/A'}, transfer method ${String(
-            extra.assetTransferMethod ?? 'eip3009',
-          )}. The EIP-712 domain is here because getting it wrong is the most common integration failure.`,
-          `Note what travels in the response: network, asset, amount, payee, and the EIP-712 domain under extra. Nothing about this seller's code has to be known in advance.`,
-        ]),
-      });
-    } else {
-      emit({ kind: 'error', text: `Expected a 402, got ${trace.status}.`, hint: trace.error });
+
+    const targets = [...QUOTE_ROUTES];
+    const firstCreator = ctx.knownCreators[0];
+    if (firstCreator) {
+      const name = firstCreator.displayName ?? firstCreator.username ?? shortAddress(firstCreator.id);
+      targets.push({ path: `/api/v1/agent/creator/${firstCreator.id}`, returns: `${name}'s profile` });
     }
-    return { lastTrace: trace };
+
+    const stopProgress = stagedProgress(emit, [{ atMs: 0, label: 'Asking each route for its price' }]);
+    let probes: RequestTrace[];
+    try {
+      probes = await Promise.all(targets.map((target) => probeResource(target.path)));
+    } finally {
+      stopProgress();
+    }
+
+    const rows = targets.map((target, index) => {
+      const terms = probes[index].terms;
+      return {
+        path: target.path,
+        returns: target.returns,
+        price: terms ? formatUsd(terms.amount) : null,
+      };
+    });
+
+    const answered = probes.filter((probe) => probe.terms);
+    if (answered.length === 0) {
+      emit({
+        kind: 'error',
+        text: 'No route returned a price, so there is nothing to quote.',
+        hint: probes[0]?.error ?? 'The seller may be unreachable.',
+      });
+      return { lastTrace: probes[0] };
+    }
+
+    const sample = answered[0].terms!;
+    const extra = (sample.extra ?? {}) as Record<string, unknown>;
+    const domain = [String(extra.name ?? 'USDC'), extra.version ? `v${String(extra.version)}` : null]
+      .filter(Boolean)
+      .join(' ');
+
+    emit({
+      kind: 'payload',
+      title: 'Every price, read live',
+      shape: 'quotes',
+      endpoint: 'quotes',
+      data: {
+        rows,
+        // Labels carry their own spaces because the card renders them in
+        // uppercase and does not split camelCase.
+        settlement: {
+          Asset: String(extra.name ?? 'USDC'),
+          Network: NETWORKS[ctx.network].label,
+          'Paid to': shortAddress(sample.payTo),
+          Transfer: String(extra.assetTransferMethod ?? 'eip3009'),
+          'EIP-712 domain': domain,
+        },
+      },
+    });
+
+    // Point the raw inspector at the catalog probe, which is the one a buyer
+    // most often wants to read in full.
+    const catalogProbe = probes[targets.findIndex((target) => target.path === '/api/v1/agent/catalog')];
+    return { lastTrace: catalogProbe ?? answered[0] };
   },
 };
 

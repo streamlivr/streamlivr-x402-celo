@@ -72,13 +72,22 @@ export default function AgentCheckoutPage() {
     if (q.includes('artist') || q.includes('creator') || q.includes('who') || q.includes('meet') || q.includes('listing')) {
       return options.find((m) => m.id === 'listings') || options[0];
     }
-    if (q.includes('music') || q.includes('catalog') || q.includes('track') || q.includes('song') || q.includes('stem') || q.includes('solaris')) {
+    if (
+      q.includes('music') ||
+      q.includes('catalog') ||
+      q.includes('track') ||
+      q.includes('song') ||
+      q.includes('album') ||
+      q.includes('nate') ||
+      q.includes('dogg') ||
+      q.includes('uzi')
+    ) {
       return options.find((m) => m.id === 'catalog') || options[0];
     }
     if (q.includes('payout') || q.includes('settle') || q.includes('test') || q.includes('ping') || q.includes('payment') || q.includes('celo')) {
       return options.find((m) => m.id === 'ping') || options[0];
     }
-    if (q.includes('quote') || q.includes('price') || q.includes('terms') || q.includes('license') || q.includes('royalty')) {
+    if (q.includes('quote') || q.includes('price') || q.includes('cost') || q.includes('terms') || q.includes('license') || q.includes('royalty')) {
       return options.find((m) => m.id === 'quote') || options[0];
     }
     if (q.includes('wallet') || q.includes('balance') || q.includes('burner') || q.includes('funds')) {
@@ -117,10 +126,13 @@ export default function AgentCheckoutPage() {
   };
 
   // Suggestion prompt pills for the empty state
+  // Each label names something the live catalogue actually contains, so a
+  // reader can tell what they are about to ask for.
   const emptyStateSuggestions = [
-    { label: 'Solaris Echoes discography', moveId: 'catalog' },
-    { label: 'Meet verified creators on Celo', moveId: 'listings' },
-    { label: 'License terms for VIP stems', moveId: 'quote' },
+    { label: 'Music & Me by Nate Dogg', moveId: 'catalog' },
+    { label: 'What You Saying by Lil Uzi Vert', moveId: 'catalog' },
+    { label: 'Which artists accept agents?', moveId: 'listings' },
+    { label: 'What does each route cost?', moveId: 'quote' },
     { label: 'Test a real 0.01 USDC payment', moveId: 'ping' },
   ];
 
