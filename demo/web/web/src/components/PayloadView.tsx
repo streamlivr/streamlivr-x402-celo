@@ -397,15 +397,33 @@ function ProfileCard({ creator }: { creator: CreatorRow }) {
  */
 function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: string } }) {
   const focus = ledger.focusCreatorId;
-  // The creator this turn was about is pinned to the top, because the rest of
+  // Biggest balance first, because that is the order a reader cares about. The
+  // creator this turn was about is then pinned above them, since the rest of
   // the ledger is background.
   const rows = [...(ledger.creators ?? [])].sort((a, b) => {
-    if (focus) {
-      if (a.creatorId === focus) return -1;
-      if (b.creatorId === focus) return 1;
-    }
+    const difference = BigInt(b.earnedAtomic || '0') - BigInt(a.earnedAtomic || '0');
+    if (difference !== 0n) return difference > 0n ? 1 : -1;
     return 0;
   });
+  const ordered = focus
+    ? [...rows].sort((a, b) => {
+        if (a.creatorId === focus) return -1;
+        if (b.creatorId === focus) return 1;
+        return 0;
+      })
+    : rows;
+
+  // One page of a paid request can credit fifty creators, and a page-wide split
+  // of one cent leaves most of them with a fraction of a cent that no payout
+  // run will ever move. Showing all of those rows buries the creators who have
+  // actually earned something, so the list stops at ten and the rest is summed.
+  const VISIBLE_ROWS = 10;
+  const visible = ordered.slice(0, VISIBLE_ROWS);
+  const hidden = ordered.slice(VISIBLE_ROWS);
+  const hiddenOutstanding = hidden.reduce((sum, creator) => sum + BigInt(creator.outstandingAtomic || '0'), 0n);
+  const minimumAtomic = ledger.totals?.payoutMinimumAtomic;
+  const minimumLabel = minimumAtomic ? formatAmount(minimumAtomic) : null;
+
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-[0_6px_24px_rgba(0,0,0,0.3)] backdrop-blur-md">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
@@ -418,45 +436,55 @@ function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: 
         <Stat value={formatUsd(ledger.totals?.creatorShareAtomic ?? '0')} label="earned" />
         <Stat value={formatUsd(ledger.totals?.paidOutAtomic ?? '0')} label="paid out" />
         <Stat value={formatUsd(ledger.totals?.outstandingAtomic ?? '0')} label="owed" />
-        <Stat value={formatCount(ledger.totals?.creators ?? rows.length)} label="creators" />
+        <Stat value={formatCount(ledger.totals?.creators ?? rows.length)} label="creators earned" />
       </div>
-      {rows.length === 0 ? (
+      {ordered.length === 0 ? (
         <p className="px-4 py-4 text-[13px] text-slate-400">
           No creator has earned anything yet. The first settled payment will create a row here.
         </p>
       ) : (
-        <ul className="divide-y divide-white/[0.06] px-4">
-          {rows.map((creator) => {
-            const name = creator.displayName ?? creator.username ?? 'Unnamed creator';
-            const outstanding = BigInt(creator.outstandingAtomic || '0');
-            return (
-              <li
-                key={creator.creatorId}
-                className={`flex items-center gap-3 py-3 ${creator.creatorId === focus ? '-mx-2 rounded-xl bg-cyan-400/[0.06] px-2 ring-1 ring-cyan-400/20' : ''}`}
-              >
-                <Avatar src={creator.avatarUrl} name={name} size={34} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13.5px] font-medium text-white">
-                    {name}
-                    {creator.creatorId === focus && (
-                      <span className="ml-2 font-mono text-[10px] uppercase tracking-wide text-cyan-300">this creator</span>
-                    )}
-                  </p>
-                  <p className="text-[11.5px] text-slate-500">
-                    {creator.salesCount} {creator.salesCount === 1 ? 'sale' : 'sales'}
-                    {creator.username ? ` · @${creator.username}` : ''}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-mono text-[12.5px] text-slate-200">{formatAmount(creator.earnedAtomic)} USDC</p>
-                  <p className={`font-mono text-[11px] ${outstanding > 0n ? 'text-amber-300' : 'text-emerald-400/80'}`}>
-                    {outstanding > 0n ? `${formatAmount(creator.outstandingAtomic)} owed` : 'settled'}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <ul className="divide-y divide-white/[0.06] px-4">
+            {visible.map((creator) => {
+              const name = creator.displayName ?? creator.username ?? 'Unnamed creator';
+              const outstanding = BigInt(creator.outstandingAtomic || '0');
+              return (
+                <li
+                  key={creator.creatorId}
+                  className={`flex items-center gap-3 py-3 ${creator.creatorId === focus ? '-mx-2 rounded-xl bg-cyan-400/[0.06] px-2 ring-1 ring-cyan-400/20' : ''}`}
+                >
+                  <Avatar src={creator.avatarUrl} name={name} size={34} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13.5px] font-medium text-white">
+                      {name}
+                      {creator.creatorId === focus && (
+                        <span className="ml-2 font-mono text-[10px] uppercase tracking-wide text-cyan-300">this creator</span>
+                      )}
+                    </p>
+                    <p className="text-[11.5px] text-slate-500">
+                      {creator.salesCount} {creator.salesCount === 1 ? 'sale' : 'sales'}
+                      {creator.username ? ` · @${creator.username}` : ''}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-mono text-[12.5px] text-slate-200">{formatAmount(creator.earnedAtomic)} USDC</p>
+                    <p className={`font-mono text-[11px] ${outstanding > 0n ? 'text-amber-300' : 'text-emerald-400/80'}`}>
+                      {outstanding > 0n ? `${formatAmount(creator.outstandingAtomic)} owed` : 'settled'}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {hidden.length > 0 && (
+            <p className="border-t border-white/[0.06] px-4 py-3 text-[12px] leading-relaxed text-slate-500">
+              {formatCount(hidden.length)} more {hidden.length === 1 ? 'creator holds' : 'creators hold'}{' '}
+              <span className="font-mono text-slate-400">{formatAmount(hiddenOutstanding)} USDC</span> between them
+              {minimumLabel ? `, all below the ${minimumLabel} USDC payout minimum` : ''}. Their shares are recorded and
+              no payment run moves an amount that small.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

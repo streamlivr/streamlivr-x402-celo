@@ -28,7 +28,10 @@ export function formatAmount(atomic: string | bigint, decimals = SETTLEMENT_DECI
   if (!Number.isFinite(value)) return text;
   if (value === 0) return '0';
   if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  const places = Math.abs(value) < 0.01 ? 3 : 2;
+  // A creator's share of a page-wide one cent split can be 0.00012. Three
+  // decimals would print that as "0" and make attribution look broken, so the
+  // smallest amounts keep the full six.
+  const places = Math.abs(value) < 0.001 ? 6 : Math.abs(value) < 0.01 ? 3 : 2;
   return value.toFixed(places).replace(/\.?0+$/, '') || '0';
 }
 

@@ -101,7 +101,7 @@ export default function AgentCheckoutPage() {
   // Suggestion chips for the empty state. They come from the seller's free
   // inventory route, so every label names something the catalogue actually
   // contains; when that route is unavailable the hook keeps its defaults.
-  const { suggestions, live: suggestionsAreLive } = useSuggestions(turns.length === 0);
+  const { suggestions } = useSuggestions(turns.length === 0);
 
   return (
     <div className="bg-ambient-gradient flex min-h-screen flex-col justify-between selection:bg-[#00daf8]/20 selection:text-[#00daf8]">
@@ -125,9 +125,8 @@ export default function AgentCheckoutPage() {
 
           {/* Conversational Subtitle */}
           <p className="mt-3.5 max-w-lg text-center text-[15px] leading-relaxed text-slate-400 sm:text-[16px]">
-            Thousands of public creators, posts and tracks, sold a page at a time over x402. Every paid answer is
-            split between the creators whose work it used, settled in USDC on Celo, and the buyer needs no gas and no
-            account. Ask about a city, a tag, a track, or what any of it costs.
+            Thousands of public creators, posts and tracks, available a page at a time over x402, and every settlement
+            is split with the creators behind it.
           </p>
 
           {/* Single Master Floating Input Bar */}
@@ -178,14 +177,6 @@ export default function AgentCheckoutPage() {
                 </button>
               ))}
             </div>
-
-            {suggestionsAreLive && (
-              <p className="mt-2.5 text-center text-[11px] font-light text-slate-500">
-                Suggestions read live from the public inventory: the seller holds thousands of rows, so it is cheaper to
-                ask what is there than to guess.
-              </p>
-            )}
-
             {/* Reassuring Protocol Note */}
             <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11.5px] font-light text-slate-400">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />

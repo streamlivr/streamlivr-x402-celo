@@ -4,7 +4,7 @@ import { prisma } from '../../config/database.js';
 import { adminAuth, getAdmin, writeAudit } from '../../middleware/adminAuth.js';
 import { X402_ASSET_ADDRESS, X402_ASSET_DECIMALS, X402_ASSET_SYMBOL, X402_ATTRIBUTION_TAG, X402_FEE_CURRENCY, X402_NETWORK } from '../../x402/config.js';
 import { buildAttributionSuffix } from '../../x402/attribution.js';
-import { computeCreatorBalances, selectPayableCreators } from '../../x402/payoutMath.js';
+import { computeCreatorBalances, selectPayableCreators, MIN_PAYOUT_ATOMIC } from '../../x402/payoutMath.js';
 import {
   isPayoutEligible,
   kycSource,
@@ -20,7 +20,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { z } from 'zod';
 
 const erc20 = parseAbi(['function transfer(address to, uint256 value) returns (bool)']);
-const MIN_PAYOUT = 1_000_000n;
+const MIN_PAYOUT = MIN_PAYOUT_ATOMIC;
 const STUCK_SUBMISSION_MS = 10 * 60_000;
 
 /**

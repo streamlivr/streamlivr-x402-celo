@@ -9,6 +9,17 @@
 /** Payout states that already commit (or have moved) money for a creator. */
 export const RESERVING_PAYOUT_STATUSES = ['PENDING', 'APPROVED', 'SUBMITTED', 'CONFIRMED'] as const;
 
+/**
+ * Smallest balance a payout run will move: one USDC.
+ *
+ * A page-wide split of a one cent payment leaves most creators holding a few
+ * thousandths of a cent, and transferring that costs more in gas than it moves.
+ * The floor is the reason those balances sit in the ledger instead of being
+ * paid out, so the demo reports how much is below it rather than listing the
+ * same rounding dust as an unpaid balance.
+ */
+export const MIN_PAYOUT_ATOMIC = 1_000_000n;
+
 export interface AttributionShare {
   creatorId: string | null;
   shareAtomic: string;

@@ -63,6 +63,7 @@ export default function SettlementsPage() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAllCreators, setShowAllCreators] = useState(false);
   const inFlight = useRef(false);
 
   const load = useCallback(async () => {
@@ -92,6 +93,13 @@ export default function SettlementsPage() {
   const totals = settlements?.totals;
   const creatorTotals = creators?.totals;
   const split = settlements?.split;
+  // A page-wide split of a one cent payment credits every creator it served,
+  // which leaves dozens of balances of a few thousandths of a cent. The list
+  // opens on the fifteen worth reading and the rest stays one click away.
+  const CREATOR_ROWS = 15;
+  const allCreators = creators?.creators ?? [];
+  const visibleCreators = showAllCreators ? allCreators : allCreators.slice(0, CREATOR_ROWS);
+  const hiddenCreators = Math.max(allCreators.length - visibleCreators.length, 0);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -253,9 +261,10 @@ export default function SettlementsPage() {
           <div className="mb-3">
             <h2 className="text-[15px] font-semibold text-text-primary">Creators and earnings</h2>
             <p className="text-[12.5px] text-text-secondary">
-              Everyone x402 has paid, and what is still owed. Public data is for sale by default, so the row to look
-              for is the one a creator revoked: it stays listed with its settled history, because a payment that
-              already happened is not undone by a later opt-out.
+              Every creator x402 has credited, biggest balance first. One page sold credits everyone it served, and a
+              page-wide split of a one cent payment leaves most of those balances below the payout minimum, so the
+              list opens on the top earners. A creator who revokes agent access keeps their settled history: a payment
+              that already happened is not undone by a later opt-out.
             </p>
           </div>
 
@@ -271,7 +280,7 @@ export default function SettlementsPage() {
               </div>
             ) : (
               <ul className="divide-y divide-border">
-                {creators?.creators.map((creator, index) => (
+                {visibleCreators.map((creator, index) => (
                   <li
                     key={creator.creatorId}
                     className="row-in flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5"
@@ -314,6 +323,17 @@ export default function SettlementsPage() {
               </ul>
             )}
           </Card>
+          {allCreators.length > CREATOR_ROWS && (
+            <button
+              type="button"
+              onClick={() => setShowAllCreators((open) => !open)}
+              className="mt-3 w-full rounded-control border border-border px-3 py-2 text-[12px] text-text-secondary transition-colors duration-150 ease-out-quart hover:border-border-strong hover:text-text-primary"
+            >
+              {showAllCreators
+                ? 'Show only the top earners'
+                : `Show all ${formatCount(allCreators.length)} creators (${formatCount(hiddenCreators)} more, mostly sub-cent balances)`}
+            </button>
+          )}
         </section>
 
         <p className="mt-6 text-center text-[11.5px] leading-relaxed text-text-muted">

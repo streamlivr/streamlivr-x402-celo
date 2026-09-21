@@ -100,6 +100,11 @@ npm run demo       # seller on http://127.0.0.1:3000
 The three data routes carry `?q=`, `?limit=` and `?cursor=`, and the price does not change with any
 of them: a page costs one cent whether it returns fifty rows or the maximum two hundred.
 
+`q` matches the fields that route actually holds. Listings match username, display name, bio, a
+two-letter country code, and the hashtags on that creator's public posts, so "amapiano creators"
+reaches the people behind the tag rather than accounts with the word in a name. Posts match caption,
+description and hashtag. Catalog matches title, artist and ISRC.
+
 ```bash
 curl "http://127.0.0.1:3000/api/v1/agent/listings?q=lagos&limit=25"
 ```

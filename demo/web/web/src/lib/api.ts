@@ -91,6 +91,11 @@ export interface CreatorsResponse {
     creatorShareAtomic: string;
     paidOutAtomic: string;
     outstandingAtomic: string;
+    /** Smallest balance a payout run will move, one USDC on mainnet. */
+    payoutMinimumAtomic?: string;
+    /** Combined balances sitting below that floor, across all creators. */
+    belowMinimumAtomic?: string;
+    belowMinimumCount?: number;
   };
   creators: LedgerCreator[];
 }

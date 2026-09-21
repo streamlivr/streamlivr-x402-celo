@@ -59,7 +59,14 @@ export interface RequestTrace {
  * which reads as a broken page rather than a network problem.
  */
 const PROBE_TIMEOUT_MS = 15_000;
-const PAYMENT_TIMEOUT_MS = 45_000;
+/**
+ * Settlement runs on the seller's facilitator, not here, and a Celo
+ * confirmation has been seen at fifteen seconds under load. A short ceiling
+ * turns a slow settlement into a timeout the buyer cannot read anything into,
+ * so this is generous on purpose: exceeding it means the request is genuinely
+ * stuck, not that the chain was busy.
+ */
+const PAYMENT_TIMEOUT_MS = 90_000;
 const BALANCE_TIMEOUT_MS = 10_000;
 
 /** Free reads get a couple of extra tries; a paid retry never does. */
@@ -135,12 +142,29 @@ function headerRecord(headers: Headers): Record<string, string> {
 function readableError(error: unknown, timeoutMs: number): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/abort|timed? ?out/i.test(message)) {
-    return `The request got no answer within ${Math.round(timeoutMs / 1000)} seconds.`;
+    return `The seller did not answer within ${Math.round(timeoutMs / 1000)} seconds, so this request is unknown. Check the ledger before sending it again.`;
   }
   if (/failed to fetch|fetch failed|networkerror|load failed|network request failed/i.test(message)) {
     return 'The browser could not reach the API. Check the connection and the API base URL.';
   }
   return message || 'The request failed before it reached the seller.';
+}
+
+/**
+ * Pull a readable reason out of a rejected settlement body.
+ *
+ * The Streamlivr API answers `{ error, reason }`. A facilitator that replies
+ * directly uses its own shape, so the other two keys are checked before giving
+ * up and printing a bare status code.
+ */
+function errorTextFrom(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const record = body as Record<string, unknown>;
+  for (const key of ['reason', 'error', 'message']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return null;
 }
 
 function blankTrace(path: string, started: number, error: string): RequestTrace {
@@ -376,11 +400,10 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
 
     const paid = response.status < 400 && receipt?.success !== false;
     // The seller puts a rejected settlement reason in the body now, so a
-    // failure reads as something actionable instead of "402".
-    const failureReason =
-      response.status >= 400 && body && typeof body === 'object' && typeof (body as { reason?: unknown }).reason === 'string'
-        ? String((body as { reason?: unknown }).reason)
-        : null;
+    // failure reads as something actionable instead of "402". `reason` is the
+    // field the Streamlivr API sets; the other two cover a facilitator that
+    // answers directly with its own error shape.
+    const failureReason = response.status >= 400 ? errorTextFrom(body) : null;
     return {
       ok: response.status < 400,
       paid,
@@ -399,7 +422,10 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
         requestHeaders: signedHeaders ?? {},
         responseHeaders: headerRecord(response.headers),
       },
-      error: response.status >= 400 ? failureReason ?? `seller answered ${response.status}` : undefined,
+      error:
+        response.status >= 400
+          ? failureReason ?? `The seller answered ${response.status} and sent no reason. Nothing was charged.`
+          : undefined,
     };
   } catch (error) {
     return blankTrace(options.path, started, readableError(error, PAYMENT_TIMEOUT_MS));
