@@ -357,7 +357,11 @@ const routeConfig: RoutesConfig = Object.fromEntries(
   paidRoutes.map((route) => [
     routePattern(route),
     {
-      accepts: [{ scheme: 'exact', network: X402_NETWORK, payTo: X402_PAY_TO!, price: { amount: route.priceAtomic, asset: X402_ASSET_ADDRESS, extra: X402_ASSET_EXTRA }, maxTimeoutSeconds: 60 }],
+      // The buyer's authorization stays valid for two minutes. Settlement is
+      // the facilitator paying gas, and a busy Celo block has pushed that past
+      // one minute; an authorization that expires mid-settlement comes back as
+      // a 402 the buyer cannot act on.
+      accepts: [{ scheme: 'exact', network: X402_NETWORK, payTo: X402_PAY_TO!, price: { amount: route.priceAtomic, asset: X402_ASSET_ADDRESS, extra: X402_ASSET_EXTRA }, maxTimeoutSeconds: 120 }],
       resource: `${discoveryContext.baseUrl}${examplePath(route)}`,
       description: route.description,
       mimeType: 'application/json',
