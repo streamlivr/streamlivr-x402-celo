@@ -37,7 +37,7 @@ interface PageMeta {
 }
 
 /**
- * "Showing 50 of 2,431 — 2,381 behind the cursor", above a list.
+ * "Showing 50 of 2,431, 2,381 more behind the cursor", above a list.
  *
  * The dataset is thousands of rows, so a card that quietly showed fifty of them
  * would read as "that is all there is". The cursor is named, because it is the
@@ -54,11 +54,10 @@ function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string
       {q ? <> matching “{q}”</> : null}
       {page.hasMore && remaining > 0 ? (
         <>
-          {' '}
-          — <span className="tabular">{formatCount(remaining)}</span> more behind the cursor, one cent a page.
+          , <span className="tabular">{formatCount(remaining)}</span> more behind the cursor, one cent a page.
         </>
       ) : (
-        ' — that is the whole result.'
+        ', and that is the whole result.'
       )}
     </p>
   );
@@ -518,6 +517,11 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
   const facts = settlement
     ? Object.entries(settlement).filter(([, value]) => value !== null && value !== undefined && value !== '')
     : [];
+  /**
+   * A route can answer without an invoice, which means this deployment does not
+   * sell it. Naming that separately stops a blank cell from reading as a bug.
+   */
+  const unpriced = rows.filter((row) => !row.price).length;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-sm backdrop-blur-md">
@@ -534,13 +538,19 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
             <tr key={row.path}>
               <td className="px-4 py-2.5 font-mono text-[12px] text-slate-200">{row.path}</td>
               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12px] text-cyan-300">
-                {row.price ?? <span className="text-slate-500">no answer</span>}
+                {row.price ?? <span className="font-sans text-slate-500">not sold here</span>}
               </td>
               <td className="hidden px-4 py-2.5 text-[12px] text-slate-400 sm:table-cell">{row.returns}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {unpriced > 0 && (
+        <p className="border-t border-white/[0.06] px-4 py-3 text-[12px] text-slate-500">
+          {unpriced === 1 ? 'One route answered without an invoice, so this deployment does not sell it.' : `${unpriced} routes answered without an invoice, so this deployment does not sell them.`}{' '}
+          Every route that is sold here costs the same: one cent a request.
+        </p>
+      )}
       {facts.length > 0 && (
         <dl className="flex flex-wrap gap-x-6 gap-y-2 border-t border-white/[0.06] px-4 py-3">
           {facts.map(([key, value]) => (
@@ -722,15 +732,12 @@ export function PayloadView({
     }
     return (
       <div className="space-y-3">
-        {tracks.slice(0, 4).map((track, index) => (
+        {/* Every row the page paid for is rendered inline. Showing four of
+            fifty and pointing at the raw JSON made a full page look truncated,
+            and a nested scroll box traps the scroll gesture on a phone. */}
+        {tracks.map((track, index) => (
           <TrackCard key={track.id ?? index} track={track} index={index} />
         ))}
-        {tracks.length > 4 && (
-          <p className="px-1 text-[12px] text-slate-500">
-            {tracks.length - 4} more {tracks.length - 4 === 1 ? 'track is' : 'tracks are'} on this page. The raw panel
-            below has the whole body.
-          </p>
-        )}
         <PageNote page={page} noun="tracks" q={q} />
       </div>
     );
@@ -751,15 +758,9 @@ export function PayloadView({
     }
     return (
       <div className="space-y-3">
-        {posts.slice(0, 4).map((post, index) => (
+        {posts.map((post, index) => (
           <PostCard key={post.id ?? index} post={post} index={index} />
         ))}
-        {posts.length > 4 && (
-          <p className="px-1 text-[12px] text-slate-500">
-            {posts.length - 4} more {posts.length - 4 === 1 ? 'post is' : 'posts are'} on this page. The raw panel below
-            has the whole body.
-          </p>
-        )}
         <PageNote page={page} noun="posts" q={q} />
       </div>
     );

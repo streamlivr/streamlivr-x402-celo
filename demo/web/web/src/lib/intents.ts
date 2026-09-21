@@ -192,8 +192,8 @@ const DEFAULT_PAGE_ROWS = 50;
  * Put search and pagination in the query string.
  *
  * This is the whole client half of the paging contract: the datasets hold
- * thousands of rows, so a page is what a cent buys. `cursor` is opaque — the
- * seller mints it and the seller validates it — and the price does not change
+ * thousands of rows, so a page is what a cent buys. `cursor` is opaque. The
+ * seller mints it and the seller validates it, and the price does not change
  * with `q`, `limit` or `cursor`. The invoice changes size, never shape.
  */
 export function withQuery(path: string, params: { q?: string | null; cursor?: string | null } = {}): string {
@@ -573,7 +573,7 @@ function creditedCount(trace: RequestTrace, shape: PayloadShape): number {
 }
 
 /**
- * "Showing 50 of 2,431 — 2,381 behind the cursor." The dataset holds thousands
+ * "Showing 50 of 2,431 and 2,381 behind the cursor." The dataset holds thousands
  * of rows, so a page that quietly showed fifty of them would read as "that is
  * all there is". The cursor is named because it is what the next cent buys.
  */
@@ -586,7 +586,7 @@ function pageSummary(spec: EndpointSpec, q: string | null, page: PageMeta | unde
   if (page.hasMore && remaining > 0) {
     return pick([
       `That is ${formatCount(returned)} of ${formatCount(total)}${scope}. ${formatCount(remaining)} more are behind the cursor, still one cent a page.`,
-      `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The rest are one cent away — the next-page chip carries the cursor.`,
+      `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The rest are one cent away, and the next-page chip carries the cursor.`,
     ]);
   }
   return `That is the whole result: ${formatCount(total)}${scope}. Nothing left behind the cursor.`;
@@ -635,7 +635,7 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
           ])
         : pick([
             'No public creator matches that query. Every public account is in the dataset, so the query is the only filter.',
-            'Empty page. The search is tokenised, so a partial name still finds its row — this one found nothing.',
+            'Empty page. The search is tokenised, so a partial name still finds its row, and this one found nothing.',
           ]),
     });
   } else if (spec.shape === 'posts') {
@@ -689,8 +689,8 @@ async function buyProfile(ctx: RunContext, emit: (block: Block) => void, creator
   emit({
     kind: 'text',
     text: pick([
-      `Buying ${label}'s profile. This route costs half a cent and credits one creator instead of a pool.`,
-      `Fetching ${label}. Single profile, same payment flow, smaller price.`,
+      `Buying ${label}'s profile. One cent, same as every other route, and the whole cent credits one creator instead of a pool.`,
+      `Fetching ${label}. Single profile, same price and same payment flow as everything else.`,
     ]),
   });
 
@@ -1169,18 +1169,18 @@ const moveEndpoints: Move = {
           { path: '/api/v1/agent/listings', price: '0.01', returns: 'Public creator listings, searchable and paged' },
           { path: '/api/v1/agent/posts', price: '0.01', returns: 'Public posts: captions, tags, media, engagement' },
           { path: '/api/v1/agent/catalog', price: '0.01', returns: 'Music catalog metadata' },
-          { path: '/api/v1/agent/creator/:id', price: '0.005', returns: 'One creator profile' },
+          { path: '/api/v1/agent/creator/:id', price: '0.01', returns: 'One creator profile' },
           { path: '/api/v1/agent/stats', price: 'free', returns: 'How much is behind the paywall' },
           { path: '/api/v1/agent/demo/settlements', price: 'free', returns: 'The public ledger page' },
         ],
-        note: 'Every route takes ?q=, ?limit= and ?cursor=. Prices are strings in token base units. 10000 is one cent, 5000 is half a cent.',
+        note: 'Every paid route costs the same: one cent, written as 10000 in token base units (six decimals). Each route also takes ?q=, ?limit= and ?cursor=.',
       },
     });
     emit({
       kind: 'text',
       text: pick([
         'Every public account and every public post is available; there is no per-creator switch to wait on. A creator can revoke agent access, and then all three data routes drop them at once.',
-        'The dataset is what the app already shows anyone. A creator who revokes access disappears from listings, posts and the catalog — the profile route answers 404.',
+        'The dataset is what the app already shows anyone. A creator who revokes access disappears from listings, posts and the catalog, and the profile route answers 404.',
       ]),
     });
     return {};

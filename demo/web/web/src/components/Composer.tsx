@@ -65,7 +65,7 @@ export function Composer({
             type="text"
             value={typedText}
             onChange={(e) => setTypedText(e.target.value)}
-            placeholder="Search creators, posts and tracks — or ask what it costs"
+            placeholder="Search creators, posts and tracks, or ask what it costs"
             disabled={busy}
             className="w-full border-none bg-transparent px-3 py-2 text-sm leading-relaxed text-white placeholder-slate-500 focus:outline-none focus:ring-0"
           />

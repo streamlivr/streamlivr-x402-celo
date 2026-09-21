@@ -17,7 +17,14 @@ import { X402_PING_PRICE_ATOMIC } from './config.js';
 export const LISTINGS_PRICE_ATOMIC = '10000';
 export const CATALOG_PRICE_ATOMIC = '10000';
 export const POSTS_PRICE_ATOMIC = '10000';
-export const CREATOR_PROFILE_PRICE_ATOMIC = '5000';
+/**
+ * Every paid route costs one cent, which is 10000 atomic units of a six
+ * decimal stablecoin. One flat price keeps the invoice table readable and
+ * removes a rounding edge case: a half cent is still more than most card
+ * networks settle, and a buyer agent comparing routes only has to read one
+ * number.
+ */
+export const CREATOR_PROFILE_PRICE_ATOMIC = '10000';
 
 /** Rows one paid page returns unless the caller asks for fewer. */
 export const DEFAULT_PAGE_LIMIT = 50;

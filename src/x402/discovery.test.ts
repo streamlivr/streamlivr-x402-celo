@@ -25,7 +25,7 @@ const context: DiscoveryContext = {
 };
 
 describe('paid route catalog', () => {
-  it('prices every route in atomic units and keeps the creator profile cheapest', () => {
+  it('prices every route in atomic units and charges one flat price for data', () => {
     const routes = buildPaidRoutes('12345');
     expect(routes.map((route) => route.path)).toEqual([
       '/api/v1/agent/ping',
@@ -37,7 +37,9 @@ describe('paid route catalog', () => {
     expect(routes[0]!.priceAtomic).toBe('12345');
     const profile = routes.find((route) => route.id === 'creator-profile')!;
     const listings = routes.find((route) => route.id === 'creator-listings')!;
-    expect(Number(profile.priceAtomic)).toBeLessThan(Number(listings.priceAtomic));
+    // One flat price across the data routes. The liveness check stays on its
+    // own env var so an operator can raise it without touching the data prices.
+    expect(profile.priceAtomic).toBe(listings.priceAtomic);
     expect(routes.every((route) => /^\d+$/.test(route.priceAtomic))).toBe(true);
   });
 

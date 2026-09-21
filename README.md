@@ -5,7 +5,7 @@ repository is the payment layer that sells that public data to software, one HTT
 over x402 on Celo. Money that arrives gets attributed to the creators whose data was served, and
 payouts leave from the Celo wallet the settlements landed in.
 
-Four paid routes, priced at $0.005 or $0.01, settled in USDC through the hosted Celo facilitator. The
+Five paid routes, one cent each, settled in USDC through the hosted Celo facilitator. The
 buyer signs an EIP-3009 authorization off-chain, retries the request, and the facilitator pays the
 gas. A buyer never needs CELO.
 
@@ -43,8 +43,8 @@ npm run dev        # http://localhost:3008
 ```
 
 The page opens on Celo mainnet. The suggestion chips are read live from the seller's free inventory
-route, so they name tags and countries that are actually in the catalogue. Type a search — a city, a
-tag, a track title and its creator — and the chat picks the dataset, buys one page, and offers the
+route, so they name tags and countries that are actually in the catalogue. Type a search, for
+example a city, a tag, a track title or its creator, and the chat picks the dataset, buys one page, and offers the
 next page plus the same query in another dataset as follow-up chips. The chat first probes the route
 and shows the invoice it got back, then signs the authorization in the background and repeats the
 call with the payment header. Nothing pops up, because the burner key lives in the
@@ -65,8 +65,8 @@ through CORS. The page shows the raw headers and the error from each step, so yo
 
 `demo/server.ts` is the same flow with an in-memory store instead of a database. Read it if you want
 to see how the seller side is wired: route config, the facilitator client, settlement, replay
-protection and the 60/40 split. The store is generated to production scale from a fixed seed —
-2,400 creators, 6,000 posts, 5,000 tracks — so the search, the cursors and the "50 of 2,431"
+protection and the 60/40 split. The store is generated to production scale from a fixed seed:
+2,400 creators, 6,000 posts, 5,000 tracks. That makes the search, the cursors and the "50 of 2,431"
 summaries are exercised against a dataset the size of the real one. It is deliberately small enough
 to read in one sitting.
 
@@ -84,7 +84,7 @@ npm run demo       # seller on http://127.0.0.1:3000
 | `GET /api/v1/agent/listings` | `10000` | Public creator listings, searchable and paged | each creator on the page |
 | `GET /api/v1/agent/posts` | `10000` | Public posts: captions, tags, media, engagement | each creator whose post is on the page |
 | `GET /api/v1/agent/catalog` | `10000` | Catalog metadata with the creators behind each track | each creator behind the tracks on the page |
-| `GET /api/v1/agent/creator/:id` | `5000` | One public profile with their public counts | that creator |
+| `GET /api/v1/agent/creator/:id` | `10000` | One public profile with their public counts | that creator |
 | `GET /api/v1/agent/stats` | free | How many creators, posts and tracks there are, and the busiest tags | none |
 | `GET /.well-known/agent.json` | free | A2A agent card with prices and the ERC-8004 identity | none |
 | `GET /.well-known/mcp.json` | free | MCP server card listing the same routes as tools | none |
@@ -125,7 +125,7 @@ curl "http://127.0.0.1:3000/api/v1/agent/listings?q=lagos&limit=25"
 
 The dataset is what the app already shows anyone: public accounts, and posts that are published and
 public, with the creators behind them. A creator who revokes agent access is removed from all three
-routes — the profile route answers `404` and their rows disappear from listings, posts and the
+routes. The profile route answers `404` and their rows disappear from listings, posts and the
 catalog. Emails, phone numbers, wallet addresses, KYC state and private or followers-only content are
 never selected, at any price. `src/x402/access.ts` is the rule, in one file, with tests.
 

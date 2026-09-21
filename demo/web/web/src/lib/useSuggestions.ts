@@ -10,7 +10,7 @@ import { fetchStats } from './api';
  * because the catalogue holds thousands of rows and changes: a chip that names
  * a track the catalogue does not have is worse than no chip at all. When the
  * inventory route is unavailable (an older deployment, or the API is down) the
- * defaults below still work — they are searches, not assertions about data.
+ * defaults below still work. They are searches, not assertions about data.
  */
 export interface Suggestion {
   /** The text a reader would type. The chat interprets it like any other query. */

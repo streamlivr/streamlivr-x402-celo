@@ -34,8 +34,8 @@ export function formatAmount(atomic: string | bigint, decimals = SETTLEMENT_DECI
 
 /**
  * Currency rendering. Three decimals are only used when the third decimal
- * carries information, so a one-cent price reads `$0.01` rather than `$0.010`
- * while a half-cent price still shows as `$0.005`.
+ * carries information, so a one-cent price reads `$0.01` rather than `$0.010`.
+ * A smaller amount keeps its own decimals, so an unusual price still reads.
  */
 export function formatUsd(atomic: string | bigint, decimals = SETTLEMENT_DECIMALS): string {
   const value = Number(fromAtomic(atomic, decimals));

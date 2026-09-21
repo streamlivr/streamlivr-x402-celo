@@ -431,8 +431,8 @@ function pathOf(request: { url: string }): string {
  *
  * Registered even when payments are switched off, where they answer unpaid.
  * That is deliberate. It lets a reviewer without a facilitator key read the
- * search and pagination contract — the totals, the cursors, the page sizes the
- * production API uses — and the bundled web demo detects the missing invoice
+ * search and pagination contract: the totals, the cursors, the page sizes the
+ * production API uses. The bundled web demo detects the missing invoice
  * and says so instead of pretending a payment happened. With X402_ENABLED=true
  * the payment hook below gates every one of these routes.
  */
@@ -524,7 +524,7 @@ function registerDataRoutes(app: FastifyInstance): void {
 
   /**
    * One public creator profile by id, with the size of their public body of
-   * work, so an agent that already knows the id pays half a cent instead of a
+   * work, so an agent that already knows the id pays for one profile instead of a
    * full listings page.
    */
   app.get('/api/v1/agent/creator/:id', async (request, reply) => {

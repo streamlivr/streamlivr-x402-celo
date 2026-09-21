@@ -7,7 +7,7 @@
  * document no agent asked for and no browser can render.
  *
  * The cursor is a keyset cursor, not an offset: it carries the sort values of
- * the last row served, and the next page is `WHERE (sort) > (cursor)` — the
+ * the last row served, and the next page is `WHERE (sort) > (cursor)`, the
  * same convention `src/utils/feedCursor.ts` uses for the app feed. A page stays
  * correct while rows are being inserted underneath it, and a stale cursor skips
  * forward instead of repeating rows.
