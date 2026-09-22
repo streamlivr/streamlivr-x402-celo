@@ -31,6 +31,37 @@ export const DEFAULT_PAGE_LIMIT = 50;
 /** Hard ceiling per request, so one payment cannot ask for the whole database. */
 export const MAX_PAGE_LIMIT = 200;
 
+/**
+ * The body key each paid data route answers with.
+ *
+ * Used to tell an empty page from a real one. A buyer who pays and receives
+ * nothing has been charged for a search that found nothing, which reads as the
+ * seller taking money for no answer, so those requests are served without
+ * settling. The liveness route is not in this list: it always sells its answer.
+ */
+export const PAGE_BODY_KEYS: Record<string, string> = {
+  '/api/v1/agent/listings': 'creators',
+  '/api/v1/agent/posts': 'posts',
+  '/api/v1/agent/catalog': 'tracks',
+};
+
+/**
+ * The body key of a paid route whose page came back with no rows, or null when
+ * the body holds rows or is not a page at all.
+ */
+export function emptyPageKey(path: string, payload: string): string | null {
+  const bodyKey = PAGE_BODY_KEYS[path];
+  if (!bodyKey) return null;
+  try {
+    const body = JSON.parse(payload) as Record<string, unknown>;
+    const rows = body[bodyKey];
+    if (Array.isArray(rows) && rows.length === 0) return bodyKey;
+  } catch {
+    // A body that will not parse is not an empty page, so it settles normally.
+  }
+  return null;
+}
+
 export interface PaidRoutePathParam {
   name: string;
   description: string;

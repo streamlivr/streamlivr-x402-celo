@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   asCountryCode,
   containsInsensitive,
+  CREATOR_QUERY_WORDS,
+  searchReadings,
   searchTokens,
   PUBLIC_CONTENT_WHERE,
   PUBLIC_CREATOR_WHERE,
@@ -40,9 +42,47 @@ describe('public data access policy', () => {
     expect(searchTokens('one two three four five six seven')).toHaveLength(6);
   });
 
-  it('matches text case-insensitively and only treats real country codes as codes', () => {
+  it('drops the punctuation a chat box sends and keeps the word under it', () => {
+    expect(searchTokens('#amapiano')).toEqual(['amapiano']);
+    expect(searchTokens('@grant')).toEqual(['grant']);
+    expect(searchTokens('creators in Nigeria?')).toEqual(['creators', 'in', 'nigeria']);
+  });
+
+  it('reads a question as the words that are actually data, strict first', () => {
+    // "in" says how the words relate, which is not a field in any table.
+    expect(searchReadings('lagos in Nigeria')).toEqual([
+      { tokens: ['lagos', 'nigeria'], match: 'all' },
+      { tokens: ['lagos', 'nigeria'], match: 'any' },
+    ]);
+    // The entity noun goes too once the caller says which shelf it is asking
+    // about, which is what turns a sentence into a country lookup.
+    expect(searchReadings('creators in Nigeria', CREATOR_QUERY_WORDS)).toEqual([
+      { tokens: ['nigeria'], match: 'all' },
+    ]);
+    expect(searchReadings('lagos producer')).toEqual([
+      { tokens: ['lagos', 'producer'], match: 'all' },
+    ]);
+    // A sentence also gets an either-one-is-enough reading, tried only after
+    // the strict reading comes back empty. Two keywords are not a sentence, so
+    // they narrow or they return nothing.
+    expect(searchReadings('lagos afrobeats')).toEqual([{ tokens: ['lagos', 'afrobeats'], match: 'all' }]);
+    expect(searchReadings('creators in lagos with house music', CREATOR_QUERY_WORDS)).toEqual([
+      { tokens: ['lagos', 'house', 'music'], match: 'all' },
+      { tokens: ['lagos', 'house', 'music'], match: 'any' },
+    ]);
+    // A query that is nothing but filler still searches for the words given,
+    // because returning the whole directory would answer a different question.
+    expect(searchReadings('show me', CREATOR_QUERY_WORDS)).toEqual([
+      { tokens: ['show', 'me'], match: 'all' },
+    ]);
+    expect(searchReadings(null)).toEqual([{ tokens: [], match: 'all' }]);
+  });
+
+  it('matches text case-insensitively and takes a country by name or by code', () => {
     expect(containsInsensitive('Lagos')).toEqual({ contains: 'Lagos', mode: 'insensitive' });
     expect(asCountryCode('ng')).toBe('NG');
+    expect(asCountryCode('Nigeria')).toBe('NG');
+    expect(asCountryCode('united kingdom')).toBe('GB');
     expect(asCountryCode('Lag os')).toBeNull();
     expect(asCountryCode('N1')).toBeNull();
   });

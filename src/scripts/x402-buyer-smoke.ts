@@ -74,6 +74,35 @@ async function main() {
   const response = await paidFetch(`${baseUrl}${paidPath}`, { headers: { accept: 'application/json' } });
   const body = await response.text();
   if (!response.ok) throw new Error(`x402 buyer request failed (${response.status}): ${body}`);
+  /**
+   * An empty page is served without settling, so there is no settlement header
+   * to check and that is the correct answer, not a failure. The canary reports
+   * it as a pass with no hash rather than as a missing payment, which is what
+   * makes `X402_BUYER_PATH="/api/v1/agent/listings?q=nothingmatches"` a usable
+   * check on the no-charge rule.
+   */
+  const noCharge = response.headers.get('x-no-charge');
+  if (noCharge) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          payer: account.address,
+          path: paidPath,
+          network,
+          status: response.status,
+          noCharge,
+          reason: response.headers.get('x-no-charge-reason'),
+          settlementTxHash: null,
+          note: 'the seller served an empty page and did not submit the authorization',
+          body: JSON.parse(body),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   // A 200 alone does not prove settlement. Decode the settlement header so a
   // canary run fails loudly when no on-chain transfer actually happened.
   const settlementHeader = response.headers.get('payment-response');

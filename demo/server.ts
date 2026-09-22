@@ -52,12 +52,26 @@ import {
   X402_PAY_TO,
   X402_PUBLIC_BASE_URL,
 } from '../src/x402/config.js';
-import { buildPaidRoutes, examplePath, routePattern, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from '../src/x402/catalog.js';
+import {
+  buildPaidRoutes,
+  emptyPageKey,
+  examplePath,
+  routePattern,
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+} from '../src/x402/catalog.js';
 import { encodeCursor, readPageQuery, type PageInfo, type PageRequest } from '../src/x402/paging.js';
 import { buildAgentCard, buildMcpServerCard, currentDiscoveryContext } from '../src/x402/discovery.js';
 import { createMcpHandler } from '../src/x402/mcp.js';
 import { readReputation } from '../src/x402/reputation.js';
 import { calculateAttributionShares, CREATOR_SHARE_BPS, PLATFORM_SHARE_BPS } from '../src/x402/split.js';
+import {
+  asCountryCode,
+  searchReadings,
+  CREATOR_QUERY_WORDS,
+  POST_QUERY_WORDS,
+  TRACK_QUERY_WORDS,
+} from '../src/x402/access.js';
 
 type PaymentState = Extract<HTTPProcessResult, { type: 'payment-verified' }> & { adapter: FastifyAdapter };
 type StoredSettlement = Parameters<x402HTTPResourceServer['createSettlementHeaders']>[0];
@@ -267,29 +281,34 @@ const CREATOR_BY_ID = new Map(CREATORS.map((creator) => [creator.id, creator]));
 const contains = (haystack: string | null | undefined, needle: string): boolean =>
   (haystack ?? '').toLowerCase().includes(needle);
 
-const isCountryCode = (value: string): boolean => /^[A-Za-z]{2}$/.test(value.trim());
-
 /**
- * The same token search the production API runs, in memory. A chat box sends a
- * sentence rather than a keyword, so every token has to match some field:
- * "music & me by nate dogg" is six tokens, and the track matches because its
- * title carries three of them and its credited creator the other two.
+ * The same search the production API runs, in memory.
+ *
+ * `searchReadings` comes straight from the paid-route module rather than being
+ * re-implemented, so a query that widens against the real database widens here
+ * too. A chat box sends a sentence: "creators in Nigeria" drops "creators" and
+ * "in", resolves the country name, and "lagos producer" still narrows.
  */
-const STOP_TOKENS = new Set(['&', 'by', 'the', 'a', 'an', 'of', 'in', 'on', 'and', 'or']);
-
-function searchTokens(q: string | null): string[] {
-  if (!q) return [];
-  const tokens = q
-    .toLowerCase()
-    .split(/[\s,]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0 && !STOP_TOKENS.has(token));
-  return [...new Set(tokens)].slice(0, 6);
-}
-
-/** True when every token matches at least one of the fields offered. */
-function matchesAllTokens(tokens: string[], fields: (string | null | undefined)[]): boolean {
-  return tokens.every((token) => fields.some((field) => contains(field, token)));
+function searchBy<T>(
+  q: string | null,
+  words: ReadonlySet<string>,
+  rows: T[],
+  fieldsOf: (row: T) => (string | null | undefined)[],
+  extra?: (row: T, token: string) => boolean,
+): T[] {
+  for (const reading of searchReadings(q, words)) {
+    const tokens = reading.tokens;
+    // No tokens means no filter: the caller asked for the whole shelf.
+    if (tokens.length === 0) return rows;
+    const hit = (row: T) => {
+      const fields = fieldsOf(row);
+      const matches = (token: string) => fields.some((field) => contains(field, token)) || Boolean(extra?.(row, token));
+      return reading.match === 'any' ? tokens.some(matches) : tokens.every(matches);
+    };
+    const matched = rows.filter(hit);
+    if (matched.length > 0) return matched;
+  }
+  return [];
 }
 
 /** `after` is the keyset test: true when a row sorts behind the cursor row. */
@@ -316,33 +335,47 @@ function pageOf<T extends { id: string }>(
   };
 }
 
+/** A creator answers to a country name as well as to the code stored on the row. */
+const creatorCountryHit = (creator: CreatorRow, token: string): boolean =>
+  asCountryCode(token) === (creator.countryCode ?? null);
+
+/**
+ * A creator also answers to the tags behind their posts, which is what keeps
+ * the demo's own suggestion chips honest: a chip built from a real tag has to
+ * reach the accounts behind that tag.
+ */
+const creatorTagHit = (creator: CreatorRow, token: string): boolean =>
+  POSTS.some((post) => post.creatorId === creator.id && post.hashtags.some((tag) => contains(tag, token)));
+
 function searchCreators(q: string | null): CreatorRow[] {
-  const tokens = searchTokens(q);
-  const code = q && isCountryCode(q) ? q.trim().toUpperCase() : null;
-  const matched = tokens.length
-    ? CREATORS.filter((creator) => {
-        const fields = [creator.username, creator.displayName, creator.bio];
-        if (tokens.length === 1 && code) return creator.countryCode === code || matchesAllTokens(tokens, fields);
-        return matchesAllTokens(tokens, fields);
-      })
-    : [...CREATORS];
-  return matched.sort((left, right) => right.followerCount - left.followerCount || left.id.localeCompare(right.id));
+  const matched = searchBy(
+    q,
+    CREATOR_QUERY_WORDS,
+    CREATORS,
+    (creator) => [creator.username, creator.displayName, creator.bio, creator.countryCode],
+    (creator, token) => creatorCountryHit(creator, token) || creatorTagHit(creator, token),
+  );
+  return [...matched].sort(
+    (left, right) => right.followerCount - left.followerCount || left.id.localeCompare(right.id),
+  );
 }
 
 function searchPosts(q: string | null): PostRow[] {
-  const tokens = searchTokens(q);
-  const matched = tokens.length
-    ? POSTS.filter((post) => matchesAllTokens(tokens, [post.title, post.description, post.hashtags.join(' ')]))
-    : [...POSTS];
-  return matched.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
+  const matched = searchBy(q, POST_QUERY_WORDS, POSTS, (post) => [
+    post.title,
+    post.description,
+    post.hashtags.join(' '),
+  ]);
+  return [...matched].sort(
+    (left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id),
+  );
 }
 
 function searchTracks(q: string | null): TrackRow[] {
-  const tokens = searchTokens(q);
-  const matched = tokens.length
-    ? TRACKS.filter((track) => matchesAllTokens(tokens, [track.title, track.artist, track.isrc]))
-    : [...TRACKS];
-  return matched.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+  const matched = searchBy(q, TRACK_QUERY_WORDS, TRACKS, (track) => [track.title, track.artist, track.isrc]);
+  return [...matched].sort(
+    (left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id),
+  );
 }
 
 const paidRoutes = buildPaidRoutes();
@@ -560,7 +593,8 @@ async function main() {
    * 402 with no terms and a paid route looks broken from the web while working
    * fine from curl.
    */
-  const EXPOSED_PAYMENT_HEADERS = 'payment-required, payment-response, x-payment-required, x-payment-response';
+  const EXPOSED_PAYMENT_HEADERS =
+    'payment-required, payment-response, x-payment-required, x-payment-response, x-no-charge, x-no-charge-reason';
   const ALLOWED_HEADERS =
     'content-type, authorization, accept, payment-signature, payment-required, payment-response, x-payment, x-payment-required, x-payment-response, ngrok-skip-browser-warning';
 
@@ -786,6 +820,15 @@ async function main() {
     if (request.x402Replayed) {
       // A client that retries after a timed-out response must not be charged twice.
       if (request.x402Replay) copyHeaders(reply, httpServer.createSettlementHeaders(request.x402Replay));
+      return payload;
+    }
+    // A search that matched nothing is not worth a cent, so the page is served
+    // unpaid and the response says so. The buyer's signed authorization was
+    // never submitted, which is why there is no receipt to show.
+    const emptyKey = emptyPageKey(state.adapter.getPath(), Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload ?? ''));
+    if (emptyKey) {
+      reply.header('x-no-charge', 'empty-page');
+      reply.header('x-no-charge-reason', `the ${emptyKey} query matched nothing`);
       return payload;
     }
     const settled = await httpServer.processSettlement(

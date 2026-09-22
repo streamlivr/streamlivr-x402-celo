@@ -49,7 +49,9 @@ next page plus the same query in another dataset as follow-up chips. The chat fi
 and shows the invoice it got back, then signs the authorization in the background and repeats the
 call with the payment header. Nothing pops up, because the burner key lives in the
 bundle. The reply arrives with the settlement transaction hash, and `Payout ledger` in the header
-shows the same payment split 60/40 between the creators and the platform.
+shows the same payment split 60/40 between the creators and the platform. On chain that settlement is
+one USDC transfer to the platform wallet. The 60/40 split is recorded in the ledger against every
+creator the page served, and those balances leave in batches once they clear the payout minimum.
 
 **Funding the burner.** The key ships inside the browser bundle, so treat it as public and keep it
 small. Send Celo mainnet USDC to the address printed at the top of `.env.local`; $0.05 covers a long
@@ -100,10 +102,19 @@ npm run demo       # seller on http://127.0.0.1:3000
 The three data routes carry `?q=`, `?limit=` and `?cursor=`, and the price does not change with any
 of them: a page costs one cent whether it returns fifty rows or the maximum two hundred.
 
-`q` matches the fields that route actually holds. Listings match username, display name, bio, a
-two-letter country code, and the hashtags on that creator's public posts, so "amapiano creators"
-reaches the people behind the tag rather than accounts with the word in a name. Posts match caption,
-description and hashtag. Catalog matches title, artist and ISRC.
+`q` matches the fields that route actually holds. Listings match username, display name, bio, country
+(code or name), and the hashtags on that creator's public posts, so "amapiano creators" reaches the
+people behind the tag rather than accounts with the word in a name. Posts match title, description
+and hashtag. Catalog matches title, artist and ISRC.
+
+A sentence is read the way a person means it. Filler words and the noun for the dataset are dropped,
+so "show me creators in Nigeria" searches one country name rather than six words that have to appear
+in a username, and "lagos producer" still narrows to both words. If the strict reading matches
+nothing, the route tries the same words as an either-one-is-enough match before it gives up.
+
+A page with no rows is not charged. The route answers `200` with an empty page and
+`x-no-charge: empty-page`, and the signed authorization is never submitted, so a search that misses
+costs the buyer nothing.
 
 ```bash
 curl "http://127.0.0.1:3000/api/v1/agent/listings?q=lagos&limit=25"
@@ -123,8 +134,11 @@ curl "http://127.0.0.1:3000/api/v1/agent/listings?q=lagos&limit=25"
   served, so a page stays correct while rows are inserted underneath it and a stale cursor skips
   forward instead of repeating rows. `src/x402/paging.ts` is the whole implementation, and it is
   unit tested.
-- `q` is tokenised. Every token has to match some field, which is what makes "music me nate dogg"
-  find a track called *Music & Me* by *Nate Dogg* instead of returning everything containing "me".
+- `q` is tokenised, and a token has to match a field for its reading to count. The first reading
+  drops the words that carry no data ("show me", "creators", "in") and requires the rest, which is
+  what makes "music nate dogg" find *Music & Me* by *Nate Dogg* instead of returning everything
+  containing "music". A reading that matches nothing hands over to one that accepts any remaining
+  word, and after that the page is empty and free.
 - `limit` is clamped to 200 rather than rejected, so a client that asks for too much still gets an
   answer it can use.
 
@@ -298,7 +312,8 @@ npm run x402:agent-status
 
 The buyer canary wraps `fetch` with the x402 client, pins the asset and a per-payment cap, and fails
 unless the response carries a `payment-response` header with a real transaction hash. A `200` on its
-own does not pass.
+own does not pass. The one exception is a page with no rows: the seller answers `x-no-charge`, the
+canary reports a pass with no hash, and nothing was submitted.
 
 For a testnet pass: request a paid route and read the `402`, fund a throwaway buyer with Sepolia USDC
 from https://faucet.circle.com, run the canary, then check the hash on
