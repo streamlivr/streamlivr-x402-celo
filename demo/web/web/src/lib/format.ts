@@ -36,14 +36,22 @@ export function formatAmount(atomic: string | bigint, decimals = SETTLEMENT_DECI
 }
 
 /**
- * Currency rendering. Three decimals are only used when the third decimal
- * carries information, so a one-cent price reads `$0.01` rather than `$0.010`.
- * A smaller amount keeps its own decimals, so an unusual price still reads.
+ * Currency rendering with as many decimals as the number needs.
+ *
+ * A one cent price reads `$0.01`, not `$0.010`. A creator's share of a
+ * page-wide cent split can be `$0.00012`, and two decimals would print that as
+ * `$0.00`, which is the one thing this ledger cannot do: it would say a creator
+ * earned nothing in the row that exists to say what they earned.
  */
 export function formatUsd(atomic: string | bigint, decimals = SETTLEMENT_DECIMALS): string {
-  const value = Number(fromAtomic(atomic, decimals));
-  const needsThree = value > 0 && value < 0.1 && Math.round(value * 1000) % 10 !== 0;
-  const places = needsThree ? 3 : 2;
+  const text = fromAtomic(atomic, decimals);
+  const value = Number(text);
+  if (!Number.isFinite(value)) return text;
+  // `fromAtomic` already dropped trailing zeros, so the number of decimals it
+  // left is exactly the number this amount needs. Two is the floor, so a whole
+  // dollar still reads `$1.00`.
+  const needed = text.includes('.') ? text.split('.')[1]!.length : 0;
+  const places = Math.min(Math.max(needed, 2), 7);
   return value.toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',

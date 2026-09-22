@@ -12,6 +12,7 @@ Nothing below is a simulated result, and rows that were cancelled say so.
 | Receiving wallet | `0x4503F32dFF9e54Ee4c0Fd9BE25bCC662abB4c4Bf` |
 | Payout wallet | same address, one wallet by design (see the note below) |
 | Buyer canary wallet | `0xf5Fe75828381b7E4881E8a5aB4575868A801038c` |
+| Settlement broadcaster | `0x0d74D5Cefd2e7F24E623330ebE3d8D4cB45fFB48`, the hosted Celo facilitator |
 | ERC-8021 attribution tag | `celo_afe6af2bc55d` |
 | ERC-8004 agent | id `9852` on the Identity Registry `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` |
 | ERC-8004 reputation | Reputation Registry `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63` |
@@ -45,6 +46,32 @@ route on this repository paid at least once.
 Settlements 1 to 7 were the first mainnet run, right after the network switch. Rows 8 and 9 were
 repeated after the discovery extension and the reputation feedback shipped, to prove those changes
 did not disturb the payment path.
+
+### An independent payment
+
+Every settlement above was made by our own buyer wallet, so they prove the seller side works and
+nothing more. This one did not come from us.
+
+| Payer | Amount | Endpoint | Tx hash | Explorer |
+|---|---|---|---|---|
+| `0xc6332eFC0412586eBDd9f747ddEed2886ad9C9eb` | `10000` (0.01 USDC) | `/api/v1/agent/catalog` | `0x8d1b293772bd6ea194db6be96578f6bd25220c29b251e63888f7f3c7def0f9a1` | [link](https://celo.blockscout.com/tx/0x8d1b293772bd6ea194db6be96578f6bd25220c29b251e63888f7f3c7def0f9a1) |
+
+The payer wallet is not one we hold, which is the point: the route took a signature from a stranger
+and settled it. The transaction called `transferWithAuthorization` on Celo USDC in block `78104607`
+and moved `0.01` USDC from that wallet to the receiving wallet.
+
+### Who pays the gas, and who broadcasts
+
+The transaction above has two addresses worth reading carefully. The payer is the wallet that signed
+the EIP-3009 authorization. The account that broadcast the transaction, and therefore paid the fee,
+is `0x0d74D5Cefd2e7F24E623330ebE3d8D4cB45fFB48`: the relayer behind the hosted Celo x402
+facilitator, named as the signer for `eip155:42220` by
+`https://api.x402.celo.org/supported`.
+
+That is the arrangement this repository is built around. The buyer signs, the seller verifies, and
+the facilitator submits and pays the gas. Streamlivr does not run that relayer, and nothing here
+needs a buyer or a creator to hold CELO. Transactions Streamlivr signs itself, the payouts, the
+agent registration and the reputation feedback, pay their own fees.
 
 ### Sepolia run, kept for history
 

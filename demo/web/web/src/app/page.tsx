@@ -171,18 +171,18 @@ export default function AgentCheckoutPage() {
                       setInputQuery('');
                     }
                   }}
-                  className="whitespace-nowrap rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-all hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-95 disabled:opacity-40"
+                  className="max-w-full truncate rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-all hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-95 disabled:opacity-40"
                 >
                   {item.label}
                 </button>
               ))}
             </div>
             {/* Reassuring Protocol Note */}
-            <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11.5px] font-light text-slate-400">
+            <p className="mt-6 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[11.5px] font-light text-slate-400">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
               <span>Autonomous x402 micropayments on Celo</span>
               <span className="text-slate-600">•</span>
-              <span>Gas sponsored</span>
+              <span>the buyer signs, the facilitator pays the gas</span>
             </p>
           </div>
         </main>

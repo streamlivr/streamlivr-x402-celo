@@ -42,6 +42,12 @@ export interface RequestTrace {
   challenge: PaymentChallenge | null;
   terms: PaymentTerms | null;
   receipt: SettlementReceipt | null;
+  /**
+   * Set when the seller served the page without settling. The only case today
+   * is an empty result, which costs nothing: the authorization was signed but
+   * never submitted, so the buyer paid no gas and no USDC moved.
+   */
+  noChargeReason: string | null;
   body: unknown;
   raw: {
     challengeHeader: string | null;
@@ -178,6 +184,7 @@ function blankTrace(path: string, started: number, error: string): RequestTrace 
     challenge: null,
     terms: null,
     receipt: null,
+    noChargeReason: null,
     body: null,
     raw: {
       challengeHeader: null,
@@ -221,6 +228,7 @@ export async function probeResource(path: string): Promise<RequestTrace> {
       challenge,
       terms: challenge?.accepts?.[0] ?? null,
       receipt: null,
+      noChargeReason: null,
       body: await readBody(response),
       raw: {
         challengeHeader,
@@ -299,6 +307,7 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
           challenge: null,
           terms: null,
           receipt: null,
+          noChargeReason: null,
           body,
           raw: {
             challengeHeader,
@@ -414,6 +423,7 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
       challenge,
       terms,
       receipt,
+      noChargeReason: response.headers.get('x-no-charge-reason'),
       body,
       raw: {
         challengeHeader,

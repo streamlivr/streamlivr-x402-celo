@@ -266,7 +266,7 @@ const ENDPOINTS: Record<'ping' | DatasetId, EndpointSpec> = {
     noun: 'posts',
     shape: 'posts',
     intro: [
-      'Fetching public posts, newest first: captions, tags and engagement.',
+      'Fetching public posts, newest first: titles, captions, tags and engagement.',
       'Listing public posts. Every row is a post that is published and public.',
     ],
   },
@@ -576,26 +576,50 @@ function creditedCount(trace: RequestTrace, shape: PayloadShape): number {
  * "Showing 50 of 2,431 and 2,381 behind the cursor." The dataset holds thousands
  * of rows, so a page that quietly showed fifty of them would read as "that is
  * all there is". The cursor is named because it is what the next cent buys.
+ *
+ * A page that is the whole result says nothing here. The caller has just said
+ * how many rows came back, and repeating the count in a second sentence is the
+ * kind of line that makes a chat read as a template.
  */
 function pageSummary(spec: EndpointSpec, q: string | null, page: PageMeta | undefined): string | null {
   if (!page || typeof page.total !== 'number' || page.total === 0) return null;
   const returned = page.returned ?? 0;
   const total = page.total;
   const remaining = Math.max(total - returned, 0);
+  if (!page.hasMore || remaining === 0) return null;
+  // `spec.noun` is plural ("creators"), so the singular form drops the s. A
+  // page of one is common on a narrow search, and "1 creators" reads as a bug.
   const scope = q ? ` ${spec.noun} matching “${q}”` : ` ${spec.noun}`;
-  if (page.hasMore && remaining > 0) {
-    return pick([
-      `That is ${formatCount(returned)} of ${formatCount(total)}${scope}. ${formatCount(remaining)} more are behind the cursor, still one cent a page.`,
-      `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The rest are one cent away, and the next-page chip carries the cursor.`,
-    ]);
-  }
-  return `That is the whole result: ${formatCount(total)}${scope}. Nothing left behind the cursor.`;
+  return pick([
+    `That is ${formatCount(returned)} of ${formatCount(total)}${scope}. ${formatCount(remaining)} more are behind the cursor, still one cent a page.`,
+    `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The rest are one cent away, and the next-page chip carries the cursor.`,
+  ]);
 }
 
 /** Shared tail for every paid call: receipt, payload, commentary. */
 function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, trace: RequestTrace): MoveOutcome {
   const { spec } = call;
   const q = call.q ?? queryOf(trace);
+
+  /**
+   * The seller does not settle an empty page, so there is no receipt and no
+   * charge. That is a result, not a failure, and it has to read that way.
+   */
+  if (trace.status < 400 && !trace.receipt && trace.noChargeReason) {
+    emit({
+      kind: 'text',
+      text: pick([
+        'That page came back empty, so nothing was charged and the cent stayed in the wallet.',
+        'No rows for that query. The seller did not settle, so this one was free.',
+      ]),
+    });
+    emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: trace.body, endpoint: call.path });
+    emit({
+      kind: 'text',
+      text: `It would have cost ${formatUsd(trace.terms?.amount ?? '0')} if there had been rows. Try a word that appears in a name, a title or a tag.`,
+    });
+    return { lastTrace: trace, next: nextMoves(ctx, trace) };
+  }
 
   if (!trace.ok || !trace.receipt?.success) {
     emit({
@@ -646,7 +670,7 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
             `${plural(rows, 'post', 'posts')} on this page, credited across ${plural(credits, 'creator', 'creators')}.`,
             `${plural(rows, 'public post', 'public posts')} returned, newest first, with the creators behind them paid.`,
           ])
-        : 'No public post matches that query. Captions, titles and tags are all searched.',
+        : 'No public post matches that query. Titles, captions and tags are all searched.',
     });
   } else if (spec.shape === 'tracks') {
     emit({
@@ -1093,6 +1117,7 @@ const moveSpend: Move = {
         challenge: null,
         terms: null,
         receipt: null,
+        noChargeReason: null,
         body: { sessionSpentAtomic: String(spent), network: NETWORKS[ctx.network].label },
         raw: { challengeHeader: null, signatureHeader: null, responseHeader: null, requestHeaders: {}, responseHeaders: {} },
       },
@@ -1274,6 +1299,21 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
   const spec = specForPath(trace.path);
   const q = queryOf(trace);
   const page = pageOf(trace);
+
+  /**
+   * A query that matched nothing did not cost anything, and offering the same
+   * words against the next dataset invites a second search with the same
+   * likelihood of an empty page. The chips after an empty result are the ones
+   * that know the data: the datasets themselves, the prices, the ledger.
+   */
+  if (spec && countRows(trace) === 0 && !trace.receipt) {
+    for (const [path, move] of ROUTE_MOVES) {
+      if (pathnameOf(trace.path) === path) continue;
+      moves.push(move);
+    }
+    moves.push(moveQuote, moveRaw);
+    return moves;
+  }
 
   const cursor = page?.hasMore ? page.nextCursor : null;
   if (spec && spec.id !== 'ping' && cursor) {

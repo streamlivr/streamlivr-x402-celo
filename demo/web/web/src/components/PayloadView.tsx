@@ -546,14 +546,15 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
     ? Object.entries(settlement).filter(([, value]) => value !== null && value !== undefined && value !== '')
     : [];
   /**
-   * A route can answer without an invoice, which means this deployment does not
-   * sell it. Naming that separately stops a blank cell from reading as a bug.
+   * A route can answer without an invoice. Naming that separately stops a blank
+   * cell from reading as a bug, and the usual cause is a refused settlement or a
+   * route that is not on this deployment, so the note says where to look.
    */
   const unpriced = rows.filter((row) => !row.price).length;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-sm backdrop-blur-md">
-      <table className="w-full text-left">
+    <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-sm backdrop-blur-md">
+      <table className="w-full min-w-[420px] text-left">
         <thead>
           <tr className="border-b border-white/[0.06] text-[10.5px] uppercase tracking-wide text-slate-500">
             <th className="px-4 py-2.5 font-medium">Route</th>
@@ -566,7 +567,7 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
             <tr key={row.path}>
               <td className="px-4 py-2.5 font-mono text-[12px] text-slate-200">{row.path}</td>
               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12px] text-cyan-300">
-                {row.price ?? <span className="font-sans text-slate-500">not sold here</span>}
+                {row.price ?? <span className="font-sans text-slate-500">no invoice</span>}
               </td>
               <td className="hidden px-4 py-2.5 text-[12px] text-slate-400 sm:table-cell">{row.returns}</td>
             </tr>
@@ -575,7 +576,9 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
       </table>
       {unpriced > 0 && (
         <p className="border-t border-white/[0.06] px-4 py-3 text-[12px] text-slate-500">
-          {unpriced === 1 ? 'One route answered without an invoice, so this deployment does not sell it.' : `${unpriced} routes answered without an invoice, so this deployment does not sell them.`}{' '}
+          {unpriced === 1
+            ? 'One route answered without an invoice. Run the list again, and if it stays blank that route is not on this deployment.'
+            : `${unpriced} routes answered without an invoice. Run the list again, and if they stay blank they are not on this deployment.`}{' '}
           Every route that is sold here costs the same: one cent a request.
         </p>
       )}
@@ -779,7 +782,7 @@ export function PayloadView({
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
           {q
-            ? `No public post matches “${q}”. Captions, descriptions and tags are searched.`
+            ? `No public post matches “${q}”. Titles, captions and tags are searched.`
             : 'No public posts came back from this page.'}
         </div>
       );

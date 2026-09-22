@@ -21,7 +21,7 @@ export interface Suggestion {
 
 const FALLBACK: Suggestion[] = [
   { label: 'lagos', hint: 'Search every public creator for a city or country.' },
-  { label: 'amapiano posts', hint: 'Search public posts by tag, caption or creator.' },
+  { label: 'amapiano posts', hint: 'Search public posts by tag, title or caption.' },
   { label: 'Lagos Nights in the catalog', hint: 'Search the catalog by track title, credited creator or ISRC.' },
   { label: 'What does each route cost?', hint: 'Read every 402 invoice. Nothing is signed.' },
 ];

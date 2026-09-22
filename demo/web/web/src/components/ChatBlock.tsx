@@ -51,21 +51,28 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
     ? `https://${network === 'mainnet' ? 'celo' : 'celo-sepolia'}.blockscout.com/tx/${hash}`
     : null;
 
+  /**
+   * One on-chain transfer, then a ledger entry per creator.
+   *
+   * The buyer signs a single transfer to the platform wallet. The 60/40 split
+   * happens in the ledger, and creators are paid in batches once their balance
+   * clears the payout minimum, so the pill must not read as if fifty transfers
+   * left the wallet at once.
+   */
   const credited =
     block.credited > 1
-      ? ` to ${block.credited} creators`
+      ? `${block.credited} creators credited in the ledger`
       : block.credited === 1
-        ? ' to 1 creator'
+        ? '1 creator credited in the ledger'
         : '';
 
   return (
-    <div className="flex items-center gap-2 pt-1">
+    <div className="flex flex-col items-start gap-1 pt-1">
       <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
         <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
         <span>
           Settled{' '}
           <strong className="font-mono font-medium text-cyan-300">{formatUsd(block.amountAtomic)}</strong> USDC
-          {credited}
         </span>
         <span className="text-slate-600">•</span>
         <span className="font-mono text-[11px] text-emerald-400">in {formatDuration(block.durationMs)}</span>
@@ -83,6 +90,12 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
           </>
         )}
       </div>
+      {credited && (
+        <p className="px-1 text-[11.5px] leading-relaxed text-slate-500">
+          One transfer to the platform wallet, {credited}. Payouts to creators leave in batches once a balance clears
+          the payout minimum.
+        </p>
+      )}
     </div>
   );
 }
