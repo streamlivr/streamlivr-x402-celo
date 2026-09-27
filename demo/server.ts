@@ -15,6 +15,8 @@
  *   GET  /.well-known/mcp.json        MCP server card listing the paid tools
  *   POST /mcp                         MCP JSON-RPC endpoint for the paid tools
  *   GET  /api/v1/agent/stats          free inventory: how much there is, and what to search
+ *   GET  /api/v1/agent/pricing        free price list: the rule, the asset, worked examples
+ *   POST /api/v1/agent/chat/interpret free: turns a visitor sentence into one API call
  *   GET  /api/v1/agent/reputation     on-chain ERC-8004 reputation, free to read
  *   GET  /api/v1/agent/*              the paid routes (402 -> sign -> settle -> 200)
  *   GET  /demo/settlements            local settlement ledger for reviewers
@@ -32,7 +34,13 @@
 import 'dotenv/config';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
-import { x402HTTPResourceServer, x402ResourceServer, type HTTPProcessResult, type RoutesConfig } from '@x402/core/server';
+import {
+  x402HTTPResourceServer,
+  x402ResourceServer,
+  type HTTPProcessResult,
+  type HTTPRequestContext,
+  type RoutesConfig,
+} from '@x402/core/server';
 import { decodePaymentResponseHeader } from '@x402/core/http';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { bazaarResourceServerExtension, declareDiscoveryExtension } from '@x402/extensions';
@@ -61,6 +69,22 @@ import {
   MAX_PAGE_LIMIT,
 } from '../src/x402/catalog.js';
 import { encodeCursor, readPageQuery, type PageInfo, type PageRequest } from '../src/x402/paging.js';
+import { MAX_REQUEST_PRICE_ATOMIC, PRICE_EXAMPLES, PRICE_RULE, creatorsPaidFor, priceForCreatorCount } from '../src/x402/pricing.js';
+import {
+  creditedCreatorIds,
+  normalizeArtistName,
+  resolvePostOwnership,
+  resolveTrackOwnership,
+  type OwnershipLookup,
+  type PostAudioFacts,
+  type RowOwnership,
+} from '../src/x402/ownership.js';
+import {
+  createChatBudget,
+  MAX_CHAT_MESSAGE_CHARS,
+  planChatMessage,
+  type ChatMoveOption,
+} from '../src/x402/chatIntent.js';
 import { buildAgentCard, buildMcpServerCard, currentDiscoveryContext } from '../src/x402/discovery.js';
 import { createMcpHandler } from '../src/x402/mcp.js';
 import { readReputation } from '../src/x402/reputation.js';
@@ -177,9 +201,30 @@ function buildDataset(): { creators: CreatorRow[]; posts: PostRow[]; tracks: Tra
     const hashtags = [...new Set(Array.from({ length: 1 + Math.floor(random() * 3) }, () => pick(TAGS)))];
     const carousel = random() < 0.15;
     const views = Math.floor(random() ** 2.6 * 900_000);
+    // Most posts carry the publisher's own audio, some borrow another
+    // creator's sound, and a few sit on a commercial recording that nobody
+    // here owns. The split is deliberate: it keeps all three attribution
+    // outcomes visible on any page a visitor happens to open.
+    const audioRoll = random();
+    const audioKind: PostRow['audioKind'] = audioRoll < 0.72 ? 'original' : audioRoll < 0.93 ? 'borrowed' : 'commercial';
+    const soundOwner = audioKind === 'borrowed' ? creators[Math.floor(random() * creators.length)]! : creator;
+    // A post with no creator sound can still fingerprint a commercial
+    // recording. Half of those name an artist who has a Streamlivr account and
+    // half name one who does not, so the page shows both outcomes: an artist
+    // credited through their account, and an amount the platform retains.
+    const detectedTrack =
+      audioKind !== 'commercial'
+        ? null
+        : random() < 0.5
+          ? { isrc: `ZZDET26${pad(index, 5)}`, artist: creators[Math.floor(random() * creators.length)]!.displayName }
+          : { isrc: `ZZDET26${pad(index, 5)}`, artist: `${pick(TITLE_WORDS)} ${pick(['Collective', 'Records', 'Sound'])}` };
     return {
       id: `po_${pad(index, 5)}`,
       creatorId: creator.id,
+      audioKind,
+      audioOwnerId: audioKind === 'commercial' ? null : soundOwner.id,
+      soundTitle: audioKind === 'commercial' ? null : `${pick(TITLE_WORDS)} (sound)`,
+      detectedTrack,
       title,
       description: `${pick(TITLE_WORDS)} in ${pick(CITIES)} #${hashtags[0] ?? 'streets'}`,
       hashtags,
@@ -204,23 +249,28 @@ function buildDataset(): { creators: CreatorRow[]; posts: PostRow[]; tracks: Tra
   // checked-in demo screenshots still resolve, and so a reviewer who searches a
   // known title finds it in a catalog of five thousand.
   const curated: TrackRow[] = [
-    { id: 'tr_00001', title: 'Lagos Nights', artist: 'Ada', isrc: 'NGAAA2600001', coverUrl: null, previewUrl: null, creatorIds: [creators[0]!.id] },
-    { id: 'tr_00002', title: 'Accra Motion', artist: 'Kwame', isrc: 'GHAAA2600002', coverUrl: null, previewUrl: null, creatorIds: [creators[1]!.id] },
-    { id: 'tr_00003', title: 'Cape Town Sun', artist: 'Zola', isrc: 'ZAAAA2600003', coverUrl: null, previewUrl: null, creatorIds: [creators[2]!.id, creators[0]!.id] },
+    // Two of these are owned by a creator on the platform and one is a
+    // commercial recording with no owner here, so the catalog shows both
+    // outcomes without a reviewer having to hunt for them.
+    { id: 'tr_00001', title: 'Lagos Nights', artist: creators[0]!.displayName, isrc: 'NGAAA2600001', coverUrl: null, previewUrl: null, ownerId: creators[0]!.id, usedInPublicPosts: 12 },
+    { id: 'tr_00002', title: 'Accra Motion', artist: creators[1]!.displayName, isrc: 'GHAAA2600002', coverUrl: null, previewUrl: null, ownerId: creators[1]!.id, usedInPublicPosts: 7 },
+    { id: 'tr_00003', title: 'Cape Town Sun', artist: 'Sunset Collective', isrc: 'ZAAAA2600003', coverUrl: null, previewUrl: null, ownerId: null, usedInPublicPosts: 4 },
   ];
   const tracks: TrackRow[] = [
     ...curated,
     ...Array.from({ length: TRACK_COUNT - curated.length }, (_, index) => {
       const creator = creators[Math.floor(random() * creators.length)]!;
       const title = `${pick(TITLE_WORDS)} ${pick(TITLE_WORDS)}`;
+      const owned = random() < 0.68;
       return {
         id: `tr_${pad(index + curated.length + 1, 5)}`,
         title: `${title[0]!.toUpperCase()}${title.slice(1)}`,
-        artist: creator.displayName,
+        artist: owned ? creator.displayName : `${pick(TITLE_WORDS)} ${pick(['Collective', 'Records', 'Sound'])}`,
         isrc: `${pick(COUNTRIES)}AAA26${pad(index, 5)}`,
         coverUrl: null,
         previewUrl: null,
-        creatorIds: [creator.id],
+        ownerId: owned ? creator.id : null,
+        usedInPublicPosts: Math.floor(random() ** 2 * 40),
       };
     }),
   ];
@@ -244,6 +294,23 @@ interface CreatorRow {
 interface PostRow {
   id: string;
   creatorId: string;
+  /**
+   * Whose audio this post carries.
+   *
+   * `original` is the publisher's own recording, `borrowed` is another
+   * creator's sound (the sound's owner is paid, not the poster), and
+   * `commercial` is audio nobody on Streamlivr owns, which the platform keeps.
+   */
+  audioKind: 'original' | 'borrowed' | 'commercial';
+  /** The Streamlivr account that owns the audio, or null for commercial audio. */
+  audioOwnerId: string | null;
+  soundTitle: string | null;
+  /**
+   * A commercial recording the fingerprint detector heard in the post, when the
+   * post has no creator sound of its own. The artist is credited only if that
+   * artist has a Streamlivr account.
+   */
+  detectedTrack: { isrc: string; artist: string } | null;
   title: string | null;
   description: string;
   hashtags: string[];
@@ -270,11 +337,132 @@ interface TrackRow {
   isrc: string;
   coverUrl: string | null;
   previewUrl: string | null;
-  creatorIds: string[];
+  /**
+   * The Streamlivr account that owns the recording, or null when nobody here
+   * does. Owning is not the same as using: a track is credited to whoever made
+   * it, never to the creators whose posts picked it up.
+   */
+  ownerId: string | null;
+  /** Public posts that draw on the track. Usage data, shown as a label. */
+  usedInPublicPosts: number;
 }
 
 const { creators: CREATORS, posts: POSTS, tracks: TRACKS } = buildDataset();
 const CREATOR_BY_ID = new Map(CREATORS.map((creator) => [creator.id, creator]));
+
+/**
+ * Who owns what, resolved once at boot.
+ *
+ * Production resolves the same two maps from the database: a recording code to
+ * the account whose original audio carries it, and a normalised artist name to
+ * an account. The rule they feed is in `src/x402/ownership.ts` and is shared
+ * with the production API, so this file cannot drift from it.
+ */
+const OWNERSHIP_LOOKUP: OwnershipLookup = {
+  soundAuthorByIsrc: new Map(
+    TRACKS.filter((track) => track.ownerId && track.isrc).map((track) => [track.isrc, track.ownerId as string]),
+  ),
+  // The first account named wins, so a duplicate display name cannot silently
+  // move a payment to whichever record was loaded last.
+  userByArtist: new Map(CREATORS.map((creator) => [normalizeArtistName(creator.displayName), creator.id])),
+};
+
+/** The audio facts on a post, in the shape the ownership rule reads. */
+function postAudioFacts(post: PostRow): PostAudioFacts {
+  return {
+    authorId: post.creatorId,
+    soundAuthorId:
+      post.audioKind === 'borrowed' ? post.audioOwnerId : post.audioKind === 'original' ? post.creatorId : null,
+    soundIsCommercial: false,
+    soundIsrc: null,
+    pickedTrack: null,
+    detectedTrack: post.detectedTrack,
+  };
+}
+
+/** What a post's audio pays, and the label the row carries. */
+function postAttribution(post: PostRow): RowOwnership {
+  return resolvePostOwnership(postAudioFacts(post), OWNERSHIP_LOOKUP);
+}
+
+/** What a track pays, and the label the row carries. */
+function trackAttribution(track: TrackRow): RowOwnership {
+  return resolveTrackOwnership({ isrc: track.isrc, artist: track.artist }, OWNERSHIP_LOOKUP);
+}
+
+/**
+ * The label a post carries in the response.
+ *
+ * Fields match the production route exactly (`audio.ownership`,
+ * `audio.ownerDisplayName`, `attribution.basis`, `attribution.note`), so the
+ * demo page and the production page render the same row from the same keys.
+ */
+function labelPost(post: PostRow): PublicPostRow {
+  const attribution = postAttribution(post);
+  const owner = attribution.creatorId ? CREATOR_BY_ID.get(attribution.creatorId) : undefined;
+  const borrowed = Boolean(attribution.creatorId) && attribution.creatorId !== post.creatorId;
+  const ownership =
+    attribution.basis === 'commercial-audio' || attribution.basis === 'unattributable'
+      ? 'commercial'
+      : borrowed
+        ? 'borrowed'
+        : 'original';
+  const { audioKind: _audioKind, detectedTrack: _detectedTrack, ...rest } = post;
+  return {
+    ...rest,
+    attribution,
+    audio: {
+      ownership,
+      soundTitle: post.soundTitle,
+      ownerUsername: owner?.username ?? null,
+      ownerDisplayName: owner?.displayName ?? null,
+      creditedToAnotherCreator: borrowed,
+    },
+  };
+}
+
+/** The label a catalog row carries in the response. */
+function labelTrack(track: TrackRow): PublicTrackRow {
+  const attribution = trackAttribution(track);
+  const owner = attribution.creatorId ? CREATOR_BY_ID.get(attribution.creatorId) : undefined;
+  return {
+    ...track,
+    attribution,
+    label: {
+      ownership: attribution.creatorId ? 'creator' : 'commercial',
+      usedInPublicPosts: track.usedInPublicPosts,
+      ownerUsername: owner?.username ?? null,
+      ownerDisplayName: owner?.displayName ?? null,
+      ownerAvatarUrl: owner?.avatarUrl ?? null,
+      isVerified: owner?.isVerified ?? false,
+    },
+  };
+}
+
+/** A post as the API serves it: public fields plus the two ownership labels. */
+type PublicPostRow = Omit<PostRow, 'audioKind' | 'detectedTrack'> & {
+  audio: {
+    ownership: 'original' | 'borrowed' | 'commercial';
+    soundTitle: string | null;
+    ownerUsername: string | null;
+    ownerDisplayName: string | null;
+    creditedToAnotherCreator: boolean;
+  };
+  attribution: RowOwnership;
+};
+
+/** A catalog row as the API serves it. */
+type PublicTrackRow = TrackRow & {
+  attribution: RowOwnership;
+  label: {
+    ownership: 'creator' | 'commercial';
+    usedInPublicPosts: number;
+    ownerUsername: string | null;
+    ownerDisplayName: string | null;
+    ownerAvatarUrl: string | null;
+    isVerified: boolean;
+  };
+};
 
 // ── Search and pagination, the same contract the production API serves ─────
 
@@ -378,6 +566,62 @@ function searchTracks(q: string | null): TrackRow[] {
   );
 }
 
+/**
+ * One page per route, resolved in one place.
+ *
+ * The price hook and the route handler both read a page through these, so the
+ * invoice and the rows it pays for cannot disagree. Production does the same
+ * thing in `src/x402/pagePlan.ts`, with a cache in front because its rows come
+ * from a database; this dataset is in memory and deterministic, so resolving it
+ * twice is not just cheap, it is guaranteed to answer identically.
+ */
+function creatorPage(page: PageRequest): { rows: CreatorRow[]; info: PageInfo } {
+  return pageOf(
+    searchCreators(page.q),
+    page,
+    (row, cursor) =>
+      row.followerCount < Number(cursor.followerCount) ||
+      (row.followerCount === Number(cursor.followerCount) && row.id > cursor.id),
+    (row) => ({ followerCount: String(row.followerCount), id: row.id }),
+  );
+}
+
+function postPage(page: PageRequest): { rows: PostRow[]; info: PageInfo } {
+  return pageOf(
+    searchPosts(page.q),
+    page,
+    (row, cursor) => row.createdAt < cursor.createdAt! || (row.createdAt === cursor.createdAt && row.id > cursor.id),
+    (row) => ({ createdAt: row.createdAt, id: row.id }),
+  );
+}
+
+function trackPage(page: PageRequest): { rows: TrackRow[]; info: PageInfo } {
+  return pageOf(
+    searchTracks(page.q),
+    page,
+    (row, cursor) => row.title > cursor.title! || (row.title === cursor.title && row.id > cursor.id),
+    (row) => ({ title: row.title, id: row.id }),
+  );
+}
+
+/** The creators a page credits, which is what the invoice is built from. */
+function creditedCreators(path: string, page: PageRequest): string[] {
+  if (path === '/api/v1/agent/listings') return creatorPage(page).rows.map((row) => row.id);
+  if (path === '/api/v1/agent/posts') return creditedCreatorIds(postPage(page).rows.map(postAttribution));
+  return creditedCreatorIds(trackPage(page).rows.map(trackAttribution));
+}
+
+/**
+ * What a request costs, resolved from the page it would return. An amount on a
+ * data route is one cent per creator credited, with a one cent floor, so an
+ * empty search quotes the floor and is then served without settling.
+ */
+function quotedAmount(path: string, query: unknown): string {
+  const parsed = readPageQuery(query, { defaultLimit: DEFAULT_PAGE_LIMIT, maxLimit: MAX_PAGE_LIMIT });
+  if (!parsed.ok) return priceForCreatorCount(0);
+  return priceForCreatorCount(creditedCreators(path, parsed.page).length);
+}
+
 const paidRoutes = buildPaidRoutes();
 const discoveryContext = currentDiscoveryContext({ routes: paidRoutes, ...(X402_PUBLIC_BASE_URL ? { baseUrl: X402_PUBLIC_BASE_URL } : {}) });
 
@@ -394,7 +638,22 @@ const routeConfig: RoutesConfig = Object.fromEntries(
       // the facilitator paying gas, and a busy Celo block has pushed that past
       // one minute; an authorization that expires mid-settlement comes back as
       // a 402 the buyer cannot act on.
-      accepts: [{ scheme: 'exact', network: X402_NETWORK, payTo: X402_PAY_TO!, price: { amount: route.priceAtomic, asset: X402_ASSET_ADDRESS, extra: X402_ASSET_EXTRA }, maxTimeoutSeconds: 120 }],
+      // A data route is priced per creator credited, so the amount comes from
+      // the page the request would return rather than from a fixed number.
+      accepts: [
+        {
+          scheme: 'exact',
+          network: X402_NETWORK,
+          payTo: X402_PAY_TO!,
+          price: route.queryParams
+            ? (context: HTTPRequestContext) => ({
+                amount: quotedAmount(route.path, context.adapter.getQueryParams?.() ?? {}),
+                asset: X402_ASSET_ADDRESS,
+                extra: X402_ASSET_EXTRA,
+              })
+            : { amount: route.priceAtomic, asset: X402_ASSET_ADDRESS, extra: X402_ASSET_EXTRA },
+        },
+      ],
       resource: `${discoveryContext.baseUrl}${examplePath(route)}`,
       description: route.description,
       mimeType: 'application/json',
@@ -427,6 +686,8 @@ interface SettlementRecord {
   /** Truncated payer address, the way the public demo ledger shows it. */
   payer: string;
   settledAt: string;
+  /** Creators the invoice paid for, one cent each. */
+  creatorsBilled: number;
   creatorIds: string[];
   attribution: Array<{ creatorId: string; shareAtomic: string; shareBps: number }>;
 }
@@ -501,6 +762,40 @@ function registerDataRoutes(app: FastifyInstance): void {
   });
 
   /**
+   * The price list, free to read.
+   *
+   * Reading a price should never cost anything, and a buyer should not have to
+   * discover the rule by paying it. This states the rule, the asset, the
+   * network and worked examples. The invoice itself is always the authority:
+   * the 402 for a specific page carries the exact amount for that page.
+   */
+  app.get('/api/v1/agent/pricing', async (_request, reply) => {
+    reply.header('cache-control', 'public, max-age=60');
+    return {
+      asset: {
+        symbol: X402_ASSET_SYMBOL,
+        address: X402_ASSET_ADDRESS,
+        decimals: X402_ASSET_DECIMALS,
+        network: X402_NETWORK,
+        chainId: X402_CHAIN_ID,
+      },
+      payTo: X402_PAY_TO ?? null,
+      rule: PRICE_RULE,
+      maximumAtomic: MAX_REQUEST_PRICE_ATOMIC,
+      routes: paidRoutes.map((route) => ({
+        path: route.path,
+        serviceName: route.serviceName,
+        title: route.title,
+        billedPer: route.queryParams ? 'creator credited' : 'request',
+        minimumAtomic: route.priceAtomic,
+        maximumAtomic: route.queryParams ? MAX_REQUEST_PRICE_ATOMIC : route.priceAtomic,
+      })),
+      examples: PRICE_EXAMPLES,
+      note: 'GET /api/v1/agent/<route> states the exact amount in the 402 before anything is signed. Reading an invoice and reading this page are both free.',
+    };
+  });
+
+  /**
    * Creator listings. `?q=` searches username, display name, bio and country
    * code; `?limit=` and `?cursor=` page through the result. The response always
    * names the total that matched, so a buyer can see the size of the dataset
@@ -511,14 +806,7 @@ function registerDataRoutes(app: FastifyInstance): void {
     if (!parsed.ok) return reply.status(400).send({ error: parsed.error, code: 'invalid_query' });
     const page = parsed.page;
 
-    const { rows: creators, info } = pageOf(
-      searchCreators(page.q),
-      page,
-      (row, cursor) =>
-        row.followerCount < Number(cursor.followerCount) ||
-        (row.followerCount === Number(cursor.followerCount) && row.id > cursor.id),
-      (row) => ({ followerCount: String(row.followerCount), id: row.id }),
-    );
+    const { rows: creators, info } = creatorPage(page);
     if (info.total > 0 && info.returned === 0) {
       return reply.status(400).send({ error: 'cursor is not a cursor this API issued', code: 'invalid_query' });
     }
@@ -533,14 +821,13 @@ function registerDataRoutes(app: FastifyInstance): void {
     if (!parsed.ok) return reply.status(400).send({ error: parsed.error, code: 'invalid_query' });
     const page = parsed.page;
 
-    const { rows: posts, info } = pageOf(
-      searchPosts(page.q),
-      page,
-      (row, cursor) => row.createdAt < cursor.createdAt! || (row.createdAt === cursor.createdAt && row.id > cursor.id),
-      (row) => ({ createdAt: row.createdAt, id: row.id }),
-    );
-    request.x402CreatorIds = [...new Set(posts.map((post) => post.creatorId))];
-    return { posts, page: info, query: { q: page.q, limit: page.limit } };
+    const { rows: posts, info } = postPage(page);
+    // Attribution follows the audio, not the account that published the post.
+    // A borrowed sound pays its owner and an unowned recording pays nobody, so
+    // the credited list is read off the labelled rows rather than off creatorId.
+    const labelled = posts.map(labelPost);
+    request.x402CreatorIds = creditedCreatorIds(labelled.map((post) => post.attribution));
+    return { posts: labelled, page: info, query: { q: page.q, limit: page.limit } };
   });
 
   /** Music catalog, title A-Z, searchable by title, creator or ISRC. */
@@ -549,14 +836,10 @@ function registerDataRoutes(app: FastifyInstance): void {
     if (!parsed.ok) return reply.status(400).send({ error: parsed.error, code: 'invalid_query' });
     const page = parsed.page;
 
-    const { rows: tracks, info } = pageOf(
-      searchTracks(page.q),
-      page,
-      (row, cursor) => row.title > cursor.title! || (row.title === cursor.title && row.id > cursor.id),
-      (row) => ({ title: row.title, id: row.id }),
-    );
-    request.x402CreatorIds = [...new Set(tracks.flatMap((track) => track.creatorIds))];
-    return { tracks, page: info, query: { q: page.q, limit: page.limit } };
+    const { rows: tracks, info } = trackPage(page);
+    const labelled = tracks.map(labelTrack);
+    request.x402CreatorIds = creditedCreatorIds(labelled.map((track) => track.attribution));
+    return { tracks: labelled, page: info, query: { q: page.q, limit: page.limit } };
   });
 
   /**
@@ -573,11 +856,37 @@ function registerDataRoutes(app: FastifyInstance): void {
       ...creator,
       stats: {
         publishedVideos: posts.length,
-        catalogTracks: TRACKS.filter((track) => track.creatorIds.includes(creator.id)).length,
+        catalogTracks: TRACKS.filter((track) => track.ownerId === creator.id).length,
         agentAccess: 'public',
       },
     };
   });
+}
+
+/**
+ * One model call, over the provider's HTTP API.
+ *
+ * This server and the browser page are the only two things that know about the
+ * model, and the key stays here. A plain POST keeps the reviewer's dependency
+ * list short: there is no client library to install for one request.
+ */
+async function generateWithGemini(apiKey: string, model: string, prompt: string): Promise<string> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 512 },
+      }),
+    },
+  );
+  if (!response.ok) throw new Error(`the model call failed with status ${response.status}`);
+  const body = (await response.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
+  if (!text) throw new Error('the model returned no text');
+  return text;
 }
 
 async function main() {
@@ -757,6 +1066,70 @@ async function main() {
 
   registerDataRoutes(app);
 
+  /**
+   * The demo chat's interpreter.
+   *
+   * The page is a browser app, so it sends the visitor's sentence here rather
+   * than holding a model key itself. This route decides which call the sentence
+   * means and hands the plan back; the page makes that call with its own wallet.
+   * It never touches a wallet, a payment or the data routes.
+   *
+   * With no GEMINI_API_KEY the route answers 503 and the page reads the
+   * sentence with its own parser. That is deliberate: a judge with no key still
+   * gets a working chat, and the fallback is the same planner production uses.
+   */
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const geminiModel = process.env.GEMINI_SUPPORT_MODEL ?? 'gemini-2.5-flash-lite';
+  const chatBudget = createChatBudget({ max: 20, windowMs: 5 * 60_000 });
+  app.post('/api/v1/agent/chat/interpret', async (request, reply) => {
+    if (!geminiKey) {
+      return reply
+        .status(503)
+        .send({ error: 'chat_unavailable', reason: 'Set GEMINI_API_KEY to route the chat with a model.' });
+    }
+    const body = (request.body ?? {}) as { message?: unknown; history?: unknown; moves?: unknown };
+    if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > MAX_CHAT_MESSAGE_CHARS) {
+      return reply.status(400).send({ error: 'invalid_request', code: 'invalid_request' });
+    }
+    if (!chatBudget.take(request.ip)) {
+      return reply.status(429).send({ error: 'rate_limited', reason: 'Too many chat requests; wait a minute and try again.' });
+    }
+    const moves: ChatMoveOption[] = Array.isArray(body.moves)
+      ? (body.moves as ChatMoveOption[]).filter(
+          (move) => move && typeof move.id === 'string' && typeof move.label === 'string',
+        ).slice(0, 24)
+      : [];
+    const history = Array.isArray(body.history)
+      ? (body.history as { role?: unknown; text?: unknown }[])
+          .filter((turn) => (turn?.role === 'user' || turn?.role === 'agent') && typeof turn.text === 'string')
+          .slice(-6)
+          .map((turn) => ({ role: turn.role as 'user' | 'agent', text: turn.text as string }))
+      : [];
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('chat interpreter timed out')), 8_000);
+    });
+    try {
+      const plan = await Promise.race([
+        planChatMessage({
+          message: body.message,
+          moves,
+          history,
+          generate: (prompt) => generateWithGemini(geminiKey, geminiModel, prompt),
+        }),
+        timeout,
+      ]);
+      reply.header('cache-control', 'no-store');
+      return { plan, model: geminiModel };
+    } catch (error) {
+      request.log.warn({ err: error }, 'demo chat interpreter failed');
+      return { plan: null, model: geminiModel, reason: 'interpreter_failed' };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  });
+
   app.get('/api/v1/agent/ping', async () => ({ ok: true, paid: X402_ENABLED, network: X402_NETWORK, asset: X402_ASSET_ADDRESS, assetSymbol: X402_ASSET_SYMBOL }));
 
     /**
@@ -870,6 +1243,11 @@ async function main() {
       payTo: String(state.paymentRequirements.payTo),
       payer,
       settledAt: new Date().toISOString(),
+      // The invoice is one cent per creator credited, so the amount both names
+      // the creators paid and states what each of them earned before the 60/40
+      // split. On chain this is a single transfer to the seller; the split and
+      // the creators it belongs to live in the ledger beside it.
+      creatorsBilled: creatorsPaidFor(amountAtomic),
       creatorIds: request.x402CreatorIds ?? [],
       attribution: calculateAttributionShares(amountAtomic, request.x402CreatorIds ?? []),
     });

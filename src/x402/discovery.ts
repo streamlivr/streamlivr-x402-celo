@@ -11,6 +11,7 @@
  * serves.
  */
 import { LISTINGS_PRICE_ATOMIC, buildPaidRoutes, examplePath, formatAtomic, type PaidRoute } from './catalog.js';
+import { MAX_REQUEST_PRICE_ATOMIC, PRICE_RULE } from './pricing.js';
 import {
   ERC8004_AGENT_ID,
   X402_ASSET_ADDRESS,
@@ -28,7 +29,7 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18';
 export const AGENT_VERSION = '1.0.0';
 export const AGENT_NAME = 'Streamlivr';
 export const AGENT_DESCRIPTION =
-  'Streamlivr pays creators over x402 on Celo. Agents can search and page through every public creator, post and music catalog entry, and every settled payment is attributed back to the creators whose data was served.';
+  'Streamlivr sells African and global creator, brand, music, content and platform metadata over x402 on Celo. Agents can search and page through public creator and brand profiles, public content and the music catalog, at one cent per creator credited. Every settled payment is attributed back to the creators whose rows were served: a post pays whoever owns its audio rather than whoever posted it, a recording pays the artist who owns it rather than the accounts that used it, and a row with no Streamlivr owner is retained by the platform.';
 export const AGENT_PROVIDER = { organization: 'Streamlivr', url: 'https://streamlivr.com' };
 export const AGENT_DOCUMENTATION_URL = 'https://github.com/streamlivr/streamlivr-x402-celo';
 
@@ -98,7 +99,24 @@ export interface PaymentRouteSummary {
   tags: string[];
   /** Query parameters the route understands. A client cannot guess these from a price. */
   queryParams: { name: string; description: string; example: string }[];
-  price: { amountAtomic: string; amount: string; decimals: number; asset: string; assetAddress: string; network: string; payTo: string };
+  /**
+   * `amountAtomic` is the minimum, which is what one credit costs. The invoice
+   * for a page is this amount multiplied by the creators the page credits, so
+   * the pair (amountAtomic, maximumAtomic) is what a client budgets against.
+   */
+  price: {
+    amountAtomic: string;
+    amount: string;
+    decimals: number;
+    asset: string;
+    assetAddress: string;
+    network: string;
+    payTo: string;
+    billedPer: 'creator credited' | 'request';
+    unitAtomic: string;
+    maximumAtomic: string;
+    rule: string;
+  };
 }
 
 /** The x402 payment detail for one route, in the shape an agent needs to pay it. */
@@ -120,6 +138,10 @@ export function paymentRouteSummary(route: PaidRoute, context: DiscoveryContext)
       assetAddress: context.assetAddress,
       network: context.network,
       payTo: context.payTo,
+      billedPer: route.queryParams ? 'creator credited' : 'request',
+      unitAtomic: route.priceAtomic,
+      maximumAtomic: route.queryParams ? MAX_REQUEST_PRICE_ATOMIC : route.priceAtomic,
+      rule: PRICE_RULE.summary,
     },
   };
 }
@@ -204,7 +226,17 @@ export interface McpToolDefinition {
   x402: {
     url: string;
     method: 'GET';
-    price: { amount: string; amountAtomic: string; asset: string; assetAddress: string; network: string; payTo: string };
+    price: {
+      amount: string;
+      amountAtomic: string;
+      asset: string;
+      assetAddress: string;
+      network: string;
+      payTo: string;
+      billedPer: 'creator credited' | 'request';
+      maximumAtomic: string;
+      rule: string;
+    };
     inputSchema: Record<string, unknown>;
   };
 }
@@ -228,7 +260,7 @@ export function buildMcpTools(context: DiscoveryContext): McpToolDefinition[] {
     return {
       name: route.id.replace(/-/g, '_'),
       title: route.title,
-      description: `${route.description} Paid route: ${context.assetSymbol} ${formatAtomic(route.priceAtomic)} on Celo, settled over x402. Without a payment the call returns the x402 payment requirements instead of data.`,
+      description: `${route.description} Paid route: ${context.assetSymbol} ${formatAtomic(route.priceAtomic)} per creator credited, one cent minimum and ${formatAtomic(MAX_REQUEST_PRICE_ATOMIC)} maximum, settled over x402 on Celo. Without a payment the call returns the x402 payment requirements instead of data, and the requirements carry the exact amount for the page that was asked for.`,
       inputSchema,
       annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false, destructiveHint: false },
       x402: {
@@ -241,6 +273,9 @@ export function buildMcpTools(context: DiscoveryContext): McpToolDefinition[] {
           assetAddress: context.assetAddress,
           network: context.network,
           payTo: context.payTo,
+          billedPer: route.queryParams ? 'creator credited' : 'request',
+          maximumAtomic: route.queryParams ? MAX_REQUEST_PRICE_ATOMIC : route.priceAtomic,
+          rule: PRICE_RULE.summary,
         },
         inputSchema,
       },

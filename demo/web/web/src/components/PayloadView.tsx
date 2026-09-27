@@ -54,7 +54,7 @@ function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string
       {q ? <> matching “{q}”</> : null}
       {page.hasMore && remaining > 0 ? (
         <>
-          , <span className="tabular">{formatCount(remaining)}</span> more behind the cursor, one cent a page.
+          , <span className="tabular">{formatCount(remaining)}</span> more behind the cursor, one cent per creator.
         </>
       ) : (
         ', and that is the whole result.'
@@ -63,9 +63,43 @@ function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string
   );
 }
 
+/**
+ * Who a row pays, in the seller's own words.
+ *
+ * Both the post and the catalog route return this shape. `basis` is the
+ * machine-readable reason and `note` is the sentence the seller wrote for it,
+ * so the card can show the reason instead of the page inventing one.
+ */
+interface OwnershipLabel {
+  creatorId: string | null;
+  basis: string;
+  note: string;
+}
+
+/** The audio a post carries, and whose work it is. */
+interface AudioLabel {
+  ownership: 'original' | 'borrowed' | 'commercial';
+  soundTitle: string | null;
+  ownerUsername: string | null;
+  ownerDisplayName: string | null;
+  creditedToAnotherCreator: boolean;
+}
+
+/** What a catalog row knows about its owner, and about its use. */
+interface CatalogLabel {
+  ownership: 'creator' | 'commercial';
+  usedInPublicPosts: number;
+  ownerUsername: string | null;
+  ownerDisplayName: string | null;
+  ownerAvatarUrl: string | null;
+  isVerified: boolean;
+}
+
 interface PostRow {
   id?: string;
   creatorId?: string;
+  attribution?: OwnershipLabel;
+  audio?: AudioLabel;
   title?: string | null;
   description?: string | null;
   hashtags?: string[];
@@ -84,6 +118,8 @@ function PostCard({ post, index }: { post: PostRow; index: number }) {
   const title = post.title?.trim() || 'Untitled post';
   const tags = post.hashtags ?? [];
   const carousel = post.mediaType === 'PHOTO_CAROUSEL';
+  const audio = post.audio;
+  const owner = audio?.ownerDisplayName ?? audio?.ownerUsername;
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-[0_6px_24px_rgba(0,0,0,0.3)] backdrop-blur-md">
       <div className="flex gap-3.5 p-3.5 sm:gap-4 sm:p-4">
@@ -129,6 +165,31 @@ function PostCard({ post, index }: { post: PostRow; index: number }) {
           </div>
         </div>
       </div>
+      {/* Whose audio this post carries, and therefore who the cent pays. A
+          borrowed sound credits its owner; audio nobody here owns stays with
+          the platform. Saying so on the row is what stops a buyer reading the
+          payout ledger as "the poster was paid for this". */}
+      {audio && (
+        <div className="border-t border-white/[0.05] px-3.5 py-2.5 sm:px-4">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-slate-500">
+            <Music2 size={12} />
+            {audio.ownership === 'original' && (
+              <span>Original audio, credited to the account that published it.</span>
+            )}
+            {audio.ownership === 'borrowed' && (
+              <span className="text-emerald-300/90">
+                Borrowed sound{audio.soundTitle ? ` (${audio.soundTitle})` : ''}, credited to{' '}
+                {owner ?? 'the artist who owns it'}, not the account that used it.
+              </span>
+            )}
+            {audio.ownership === 'commercial' && (
+              <span className="text-amber-300/90">
+                {post.attribution?.note ?? 'Audio with no Streamlivr owner on this row, so this cent stays with the platform.'}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -193,7 +254,8 @@ interface TrackRow {
   externalId?: string | null;
   coverUrl?: string | null;
   previewUrl?: string | null;
-  creatorIds?: string[];
+  attribution?: OwnershipLabel;
+  label?: CatalogLabel;
 }
 
 function CoverArt({ src, title, size = 64 }: { src?: string | null; title: string; size?: number }) {
@@ -228,7 +290,9 @@ function CoverArt({ src, title, size = 64 }: { src?: string | null; title: strin
 function TrackCard({ track, index }: { track: TrackRow; index: number }) {
   const title = track.title ?? 'Untitled track';
   const artist = track.artist ?? 'Unknown creator';
-  const creatorCount = track.creatorIds?.length ?? 0;
+  const label = track.label;
+  const owner = label?.ownerDisplayName ?? label?.ownerUsername;
+  const owned = label?.ownership === 'creator';
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-[0_6px_24px_rgba(0,0,0,0.3)] backdrop-blur-md">
@@ -245,21 +309,28 @@ function TrackCard({ track, index }: { track: TrackRow; index: number }) {
             </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-slate-400">
-            <span className="inline-flex items-center gap-1 text-emerald-300">
-              <BadgeCheck size={12} />
-              Paid asset
-            </span>
+            {owned ? (
+              <span className="inline-flex items-center gap-1 text-emerald-300">
+                <BadgeCheck size={12} />
+                {owner ? `credited to ${owner}` : 'credited to a creator'}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-amber-300">
+                <BadgeCheck size={12} />
+                no Streamlivr owner, the platform keeps this one
+              </span>
+            )}
             {track.isrc && (
               <>
                 <span className="text-slate-600">•</span>
                 <span className="font-mono">{track.isrc}</span>
               </>
             )}
-            {creatorCount > 0 && (
+            {label && label.usedInPublicPosts > 0 && (
               <>
                 <span className="text-slate-600">•</span>
                 <span>
-                  {creatorCount === 1 ? 'credited to 1 creator' : `credited to ${creatorCount} creators`}
+                  used in {label.usedInPublicPosts} public {label.usedInPublicPosts === 1 ? 'post' : 'posts'}
                 </span>
               </>
             )}
@@ -269,7 +340,7 @@ function TrackCard({ track, index }: { track: TrackRow; index: number }) {
       <div className="border-t border-white/[0.05] px-3.5 py-2.5 sm:px-4">
         <span className="flex items-center gap-2 text-[11.5px] text-slate-500">
           <Music2 size={12} />
-          Metadata only: artwork, ISRC, and the creators who own the recording.
+          {track.attribution?.note ?? 'Metadata only: artwork, ISRC, and the creator who owns the recording.'}
         </span>
       </div>
     </div>
@@ -413,10 +484,10 @@ function LedgerCard({ ledger }: { ledger: CreatorsResponse & { focusCreatorId?: 
       })
     : rows;
 
-  // One page of a paid request can credit fifty creators, and a page-wide split
-  // of one cent leaves most of them with a fraction of a cent that no payout
-  // run will ever move. Showing all of those rows buries the creators who have
-  // actually earned something, so the list stops at ten and the rest is summed.
+  // Every creator on the page is credited a whole cent and keeps 60 percent of
+  // it. The list still stops at ten rows, because a page can credit dozens of
+  // creators and a list that long buries the ones who have earned something;
+  // the rest is summed underneath.
   const VISIBLE_ROWS = 10;
   const visible = ordered.slice(0, VISIBLE_ROWS);
   const hidden = ordered.slice(VISIBLE_ROWS);
@@ -579,7 +650,7 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
           {unpriced === 1
             ? 'One route answered without an invoice. Run the list again, and if it stays blank that route is not on this deployment.'
             : `${unpriced} routes answered without an invoice. Run the list again, and if they stay blank they are not on this deployment.`}{' '}
-          Every route that is sold here costs the same: one cent a request.
+          A page costs one cent per creator it credits, with a one cent minimum per request.
         </p>
       )}
       {facts.length > 0 && (

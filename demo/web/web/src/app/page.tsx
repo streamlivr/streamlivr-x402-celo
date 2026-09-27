@@ -11,7 +11,7 @@ import { useSuggestions } from '@/lib/useSuggestions';
 import { BURNER_PRIVATE_KEY } from '@/lib/config';
 import { formatUsd } from '@/lib/format';
 import { getSessionSpentAtomic } from '@/lib/x402pay';
-import { interpretQuery, type Move } from '@/lib/intents';
+import { interpretQuery, resolveMove, type Move } from '@/lib/intents';
 
 export default function AgentCheckoutPage() {
   const { turns, options, busy, networkLabel, send, markStreamDone, settlementCount, settledNetwork, reset } =
@@ -66,23 +66,45 @@ export default function AgentCheckoutPage() {
   const sessionSpent = useMemo(() => formatUsd(String(sessionSpentAtomic)), [sessionSpentAtomic]);
 
   /**
-   * Typed text is interpreted by the same module the chips use, so the two
-   * cannot disagree about what "amapiano posts" means. A dataset word turns
-   * into a search on that dataset, a question about pricing turns into the
-   * price list, and anything else is treated as a search over public creators.
+   * Chips are short and always name a dataset, so the local reader resolves
+   * them with no round trip. A typed sentence goes to the seller's model first,
+   * with the last few turns as context, and falls back to the same local reader
+   * when the model is unavailable.
    */
   const findMove = (query: string): Move | undefined => interpretQuery(query, options);
 
-  const handlePromptSubmit = (e?: React.FormEvent) => {
+  /**
+   * The last few turns, as the interpreter sees them. An agent turn is its
+   * spoken lines joined: the payload and the receipt say nothing about what the
+   * visitor meant.
+   */
+  const history = useMemo(
+    () =>
+      turns.slice(-4).map((turn) =>
+        turn.role === 'user'
+          ? { role: 'user' as const, text: turn.label }
+          : {
+              role: 'agent' as const,
+              text: turn.blocks
+                .filter((block): block is Extract<typeof block, { kind: 'text' }> => block.kind === 'text')
+                .map((block) => block.text)
+                .join(' ')
+                .slice(0, 300),
+            },
+      ),
+    [turns],
+  );
+
+  const handlePromptSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const query = inputQuery.trim();
     if (busy || !query) return;
 
-    const targetMove = findMove(query);
+    setInputQuery('');
+    const targetMove = await resolveMove(query, options, history);
     if (targetMove) {
       pinnedRef.current = true;
       send({ ...targetMove, label: query });
-      setInputQuery('');
     }
   };
 
@@ -258,6 +280,7 @@ export default function AgentCheckoutPage() {
         <Composer
           options={options}
           busy={busy}
+          history={history}
           onPick={handlePickOption}
           onReset={reset}
           networkLabel={networkLabel}

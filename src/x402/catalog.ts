@@ -7,27 +7,40 @@
  * be quoted a different price by a different surface.
  *
  * Every data route is paginated and searchable. The seller holds thousands of
- * creators, posts and tracks, so a response is one page plus the total that
- * matched and a cursor for the next page. `q`, `limit` and `cursor` travel as
- * query parameters and never change the price: an agent that pages through the
- * whole catalog pays the per-request price for each page it asks for.
+ * creators, posts and tracks covering African and global creators, brands,
+ * music, content and platform activity, so a response is one page plus the
+ * total that matched and a cursor for the next page. `q`, `limit` and `cursor`
+ * travel as query parameters, and `limit` is the one that moves the price: the
+ * buyer is billed one cent per creator the page credits, so asking for a bigger
+ * page costs more and a buyer that pages through the whole catalog pays for
+ * each page as it arrives.
  */
 import { X402_PING_PRICE_ATOMIC } from './config.js';
+import { CREATOR_UNIT_PRICE_ATOMIC, FLOOR_REQUEST_PRICE_ATOMIC, PRICE_RULE } from './pricing.js';
 
-export const LISTINGS_PRICE_ATOMIC = '10000';
-export const CATALOG_PRICE_ATOMIC = '10000';
-export const POSTS_PRICE_ATOMIC = '10000';
 /**
- * Every paid route costs one cent, which is 10000 atomic units of a six
- * decimal stablecoin. One flat price keeps the invoice table readable and
- * removes a rounding edge case: a half cent is still more than most card
- * networks settle, and a buyer agent comparing routes only has to read one
- * number.
+ * What each route costs at its cheapest.
+ *
+ * The published number is one cent, which is the unit price of a credited
+ * creator and the floor for any request. The amount on a data route is that
+ * unit multiplied by the creators the page credits, so the 402 invoice is
+ * always one cent or more and never a fraction of one. `priceAtomic` on a route
+ * means "the amount in the invoice when this page credits one creator", which
+ * is what a discovery catalog needs to rank a route by cost before it calls it.
  */
-export const CREATOR_PROFILE_PRICE_ATOMIC = '10000';
+export const LISTINGS_PRICE_ATOMIC = CREATOR_UNIT_PRICE_ATOMIC;
+export const CATALOG_PRICE_ATOMIC = CREATOR_UNIT_PRICE_ATOMIC;
+export const POSTS_PRICE_ATOMIC = CREATOR_UNIT_PRICE_ATOMIC;
+export const CREATOR_PROFILE_PRICE_ATOMIC = FLOOR_REQUEST_PRICE_ATOMIC;
 
-/** Rows one paid page returns unless the caller asks for fewer. */
-export const DEFAULT_PAGE_LIMIT = 50;
+/**
+ * Rows one paid page returns unless the caller asks for fewer.
+ *
+ * Ten, not the fifty this used to be: rows are what the buyer pays for now, so
+ * the default has to be a small bill. A caller that wants fifty creators asks
+ * for `limit=50` and is quoted fifty cents for it.
+ */
+export const DEFAULT_PAGE_LIMIT = 10;
 /** Hard ceiling per request, so one payment cannot ask for the whole database. */
 export const MAX_PAGE_LIMIT = 200;
 
@@ -103,12 +116,13 @@ export interface PaidRoute {
 export const PAGE_QUERY_PARAMS: PaidRouteQueryParam[] = [
   {
     name: 'q',
-    description: 'Free-text search. Matches names, titles, bios and tags on that route. Omit to list everything.',
+    description:
+      'Free-text search. Matches names, titles, bios, hashtags, country names and country codes on that route. Omit to list everything.',
     example: 'lagos',
   },
   {
     name: 'limit',
-    description: `Rows to return, 1-${MAX_PAGE_LIMIT}, default ${DEFAULT_PAGE_LIMIT}. Does not change the price.`,
+    description: `Rows to return, 1-${MAX_PAGE_LIMIT}, default ${DEFAULT_PAGE_LIMIT}. This is the cost control: the invoice is one cent per creator the page credits, so a bigger page costs more.`,
     example: String(DEFAULT_PAGE_LIMIT),
   },
   {
@@ -120,8 +134,9 @@ export const PAGE_QUERY_PARAMS: PaidRouteQueryParam[] = [
 
 /**
  * Builds the paid route list. The price of the liveness route is an env var so
- * an operator can raise it without a code change; the data routes are fixed
- * because their prices are documented in the hackathon submission.
+ * an operator can raise it without a code change; every data route is billed as
+ * one cent per creator credited, which is the unit price stated in the
+ * hackathon submission.
  */
 export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC): PaidRoute[] {
   return [
@@ -140,10 +155,10 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       path: '/api/v1/agent/listings',
       serviceName: 'streamlivr-listings',
       id: 'creator-listings',
-      title: 'Creator listings',
+      title: 'Creator and brand directory',
       description:
-        'Every public Streamlivr creator with their profile fields, avatar URL, country and follower counts. Searchable with ?q= and paginated: the response carries the total that matched and a nextCursor. Every creator on the page is recorded for revenue attribution when the payment settles.',
-      tags: ['x402', 'celo', 'creators', 'discovery', 'search'],
+        `Public creator and brand profiles from Streamlivr and the wider African and global creator economy: display name, bio, avatar, country, follower and following counts, verification and account age. Searchable by name, bio, country name or country code with ?q=, and paginated, so the response carries the total that matched and a nextCursor. Priced per creator credited and attributed to each one when the payment settles. ${PRICE_RULE.summary}`,
+      tags: ['x402', 'celo', 'creators', 'brands', 'africa', 'global', 'discovery', 'search'],
       priceAtomic: LISTINGS_PRICE_ATOMIC,
       queryParams: PAGE_QUERY_PARAMS,
       example: {
@@ -168,10 +183,10 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       path: '/api/v1/agent/posts',
       serviceName: 'streamlivr-posts',
       id: 'public-posts',
-      title: 'Public posts',
+      title: 'Public content feed',
       description:
-        'Published public posts from every public account: caption, hashtags, media and length, engagement counts, thumbnail and creator id. Searchable with ?q= and paginated. This is the same public feed content the app renders, sold per page.',
-      tags: ['x402', 'celo', 'posts', 'content', 'search'],
+        `Published public content from every public account: title, caption, hashtags, media type and length, engagement counts, and thumbnail. Each row carries an "audio" label and an "attribution" note naming the creator who owns the audio on it, because a post pays whoever made its sound rather than whoever posted it: a borrowed sound credits its owner, and audio with no Streamlivr owner is retained by the platform. That is African and global creator content, brand activity and platform engagement metadata together. Searchable by caption, hashtag or creator with ?q=, and paginated. Priced per creator credited and attributed to each one when the payment settles. ${PRICE_RULE.summary}`,
+      tags: ['x402', 'celo', 'posts', 'content', 'africa', 'global', 'brands', 'engagement', 'search'],
       priceAtomic: POSTS_PRICE_ATOMIC,
       queryParams: PAGE_QUERY_PARAMS,
       example: {
@@ -205,10 +220,10 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       path: '/api/v1/agent/catalog',
       serviceName: 'streamlivr-catalog',
       id: 'music-catalog',
-      title: 'Music catalog',
+      title: 'Music and audio metadata',
       description:
-        'Every catalogued track with title, artist, ISRC, artwork, a playable preview clip when the source provides one, and the public creator ids that supplied each track. Searchable with ?q= and paginated. Matches how the Streamlivr app indexes audio for video, so agent results line up with in-app search.',
-      tags: ['x402', 'celo', 'music', 'catalog', 'search'],
+        `Music and audio metadata for African and global repertoire: title, artist, ISRC, artwork, and a playable preview clip when the source provides one. Each row carries a "label" block that names its owner and how many public posts draw on it, and an "attribution" note. A recording is credited to the artist who owns it, never to the accounts whose posts used it; a recording with no Streamlivr owner is retained by the platform. Searchable by title or artist with ?q= and paginated. Matches how the Streamlivr app indexes audio for video, so agent results line up with in-app search. Priced per creator credited and attributed to each one when the payment settles. ${PRICE_RULE.summary}`,
+      tags: ['x402', 'celo', 'music', 'audio', 'metadata', 'isrc', 'africa', 'global', 'search'],
       priceAtomic: CATALOG_PRICE_ATOMIC,
       queryParams: PAGE_QUERY_PARAMS,
       example: {
@@ -233,8 +248,8 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       id: 'creator-profile',
       title: 'Creator profile',
       description:
-        'One public creator profile by id, with the counts of their published posts and catalogued tracks. Cheaper than a listings page when the agent already knows which creator it needs.',
-      tags: ['x402', 'celo', 'creators', 'profile'],
+        'One public creator or brand profile by id, with the counts of their published content and catalogued tracks. One creator, so one cent, which is the cheapest way to buy when the agent already knows which profile it needs.',
+      tags: ['x402', 'celo', 'creators', 'brands', 'profile'],
       priceAtomic: CREATOR_PROFILE_PRICE_ATOMIC,
       pathParam: {
         name: 'id',

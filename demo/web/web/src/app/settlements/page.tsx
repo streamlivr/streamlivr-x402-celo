@@ -338,8 +338,9 @@ export default function SettlementsPage() {
 
         <p className="mt-6 text-center text-[11.5px] leading-relaxed text-text-muted">
           Every settled payment splits {split ? `${split.creatorBps / 100}% to creators and ${split.platformBps / 100}% to the platform` : '60% to creators and 40% to the platform'}.
-          Attribution follows the rows an endpoint actually returned, so a buyer cannot claim a creator they did not pay
-          for.
+          A request is priced at one cent per creator it credits, and attribution follows the work rather than the
+          account that published a row: a post pays whoever owns its audio, a recording pays the artist who owns it, and
+          someone you did not pay for cannot appear here.
         </p>
       </main>
     </div>

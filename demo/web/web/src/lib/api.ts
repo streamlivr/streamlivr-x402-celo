@@ -100,6 +100,43 @@ export interface CreatorsResponse {
   creators: LedgerCreator[];
 }
 
+/**
+ * The seller's published price rule, read from the free pricing route.
+ *
+ * The demo shows this instead of a hardcoded table, so what a visitor reads is
+ * what the deployment actually charges. `minimumAtomic` is the unit price and
+ * `maximumAtomic` is the ceiling one request can reach.
+ */
+export interface PricingRoute {
+  path: string;
+  serviceName: string;
+  title: string;
+  billedPer: string;
+  minimumAtomic: string;
+  maximumAtomic: string;
+}
+
+export interface PricingResponse {
+  asset: { symbol: string; address: string; decimals: number; network: string; chainId: number };
+  payTo: string | null;
+  rule: {
+    billedUnit: string;
+    unitPriceAtomic: string;
+    unitPriceUsd: string;
+    floorAtomic: string;
+    floorUsd: string;
+    maxAtomic: string;
+    maxUsd: string;
+    maxCreatorsPerRequest: number;
+    summary: string;
+    notCharged: string[];
+  };
+  maximumAtomic: string;
+  routes: PricingRoute[];
+  examples: { creators: number; amountAtomic: string; usd: string; perCreatorUsd: string }[];
+  note?: string;
+}
+
 export class DemoApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -139,6 +176,21 @@ export function fetchCreators(signal?: AbortSignal): Promise<CreatorsResponse> {
 
 export function fetchStats(signal?: AbortSignal): Promise<StatsResponse> {
   return getJson<StatsResponse>('/api/v1/agent/stats', signal);
+}
+
+/**
+ * The price list, read from the free pricing route.
+ *
+ * Returns null when the deployment does not answer it (an older build, or a
+ * route that is not switched on), so the caller can fall back to the copy in
+ * the move rather than showing an error for a file that is only informational.
+ */
+export async function fetchPricing(signal?: AbortSignal): Promise<PricingResponse | null> {
+  try {
+    return await getJson<PricingResponse>('/api/v1/agent/pricing', signal);
+  } catch {
+    return null;
+  }
 }
 
 /** Health check used by the header pill so the page can say "API unreachable". */

@@ -2,7 +2,8 @@
 
 import { MAX_ATOMIC_PER_REQUEST, NETWORKS, NETWORK_ORDER, explorerTx, shortAddress, type NetworkKey } from './config';
 import { formatCount, formatUsd } from './format';
-import { fetchCreators } from './api';
+import { fetchCreators, fetchPricing, type PricingResponse } from './api';
+import { interpretWithModel, type ChatPlan } from './interpret';
 import {
   fetchAssetBalance,
   fetchNativeBalance,
@@ -205,6 +206,19 @@ export function withQuery(path: string, params: { q?: string | null; cursor?: st
   return suffix ? `${path}?${suffix}` : path;
 }
 
+/**
+ * Creators an invoice paid for.
+ *
+ * The seller bills one cent per creator credited, so this many whole cents is
+ * this many creators. Reading it back is how the chat can say what a page is
+ * buying before the buyer signs, rather than only naming a total.
+ */
+function creatorsBilled(amountAtomic: string): number {
+  const amount = Number(amountAtomic);
+  if (!Number.isFinite(amount) || amount <= 0) return 1;
+  return Math.max(1, Math.round(amount / 10000));
+}
+
 function pageOf(trace: RequestTrace): PageMeta | undefined {
   return asRecord(asRecord(trace.body)?.page) as PageMeta | undefined;
 }
@@ -399,16 +413,53 @@ export function planQuery(text: string, options: Move[]): QueryPlan | undefined 
 }
 
 /** A search on one dataset, ready to run and to pay for. */
-function searchMove(dataset: DatasetId, q: string | null, label?: string, hint?: string): Move {
+function searchMove(dataset: DatasetId, q: string | null, label?: string, hint?: string, lead?: string): Move {
   const spec = DATASETS[dataset];
   const reason = q ? `search ${spec.noun} for “${q}”` : `list ${spec.noun}`;
   return {
     id: `search:${dataset}`,
     label: label ?? (q ? `Search ${spec.noun} for “${q}”` : `List ${spec.noun}`),
-    hint: hint ?? `${reason}. One page, one cent, cursor for the next.`,
+    hint: hint ?? `${reason}. One cent per creator credited, and the cursor buys the next page the same way.`,
     group: 'discover',
-    run: (ctx, emit) => buy(ctx, emit, { spec, path: withQuery(spec.path, { q }), q }),
+    run: (ctx, emit) => buy(ctx, emit, { spec, path: withQuery(spec.path, { q }), q, ...(lead ? { lead } : {}) }),
   };
+}
+
+/**
+ * The same planner, but the seller's model reads the sentence first.
+ *
+ * The browser cannot hold a model key, so the sentence goes to the API's
+ * interpreter route and comes back as one call. Everything that route cannot
+ * answer falls through to `interpretQuery`, which is the reader this page
+ * shipped with. A model that is unavailable, slow or wrong therefore costs the
+ * visitor nothing: the chat behaves exactly as it did before.
+ */
+export async function resolveMove(
+  text: string,
+  options: Move[],
+  history: readonly { role: 'user' | 'agent'; text: string }[] = [],
+): Promise<Move | undefined> {
+  const fallback = () => interpretQuery(text, options);
+  let plan: ChatPlan | null = null;
+  try {
+    plan = await interpretWithModel({
+      message: text,
+      moves: options.map((move) => ({ id: move.id, label: move.label, ...(move.hint ? { hint: move.hint } : {}) })),
+      history,
+    });
+  } catch {
+    return fallback();
+  }
+  if (!plan) return fallback();
+
+  const action = plan.action;
+  if (action.kind === 'search') {
+    return searchMove(action.dataset as DatasetId, action.q, undefined, undefined, plan.reply ?? undefined);
+  }
+  // The model named one of the moves already on screen. Its own narration is
+  // dropped here: every move has a line of its own, and saying both would be
+  // the same sentence twice.
+  return options.find((move) => move.id === action.moveId) ?? CORE_MOVES.find((move) => move.id === action.moveId) ?? fallback();
 }
 
 /**
@@ -430,6 +481,8 @@ interface PaidCall {
   spec: EndpointSpec;
   path: string;
   q?: string | null;
+  /** A line the seller's model wrote for this request, when it wrote one. */
+  lead?: string;
 }
 
 /**
@@ -443,12 +496,14 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
 
   emit({
     kind: 'text',
-    text: q
-      ? pick([
-          `Searching ${spec.noun} for “${q}”. Every public row is in the index, and one page is one cent.`,
-          `Looking for “${q}” across ${spec.noun}. The seller searches everything and bills the page it returns.`,
-        ])
-      : pick(spec.intro),
+    text:
+      call.lead ??
+      (q
+        ? pick([
+            `Searching ${spec.noun} for “${q}”. One cent per creator credited, so a wider page costs more and a page that finds nothing is free.`,
+            `Looking for “${q}” across ${spec.noun}. The seller searches everything, prices the page it returns, and states the total in the 402.`,
+          ])
+        : pick(spec.intro)),
   });
 
   const stopProbeProgress = stagedProgress(emit, [
@@ -493,13 +548,20 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
 
   if (probe.terms) {
     emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge, mode: 'payable' });
+    const billed = creatorsBilled(probe.terms.amount);
     emit({
       kind: 'text',
       text: pick([
         `The seller wants ${formatUsd(probe.terms.amount)} in ${assetName} on ${
           NETWORKS[ctx.network].label
-        }, paid to ${shortAddress(probe.terms.payTo)}. Nothing has been signed yet.`,
-        `Price: ${formatUsd(probe.terms.amount)} in ${assetName}, whatever the page holds. That is the whole negotiation, and it arrived with the 402.`,
+        } for ${plural(billed, 'creator', 'creators')}, one cent each, paid to ${shortAddress(
+          probe.terms.payTo,
+        )}. Nothing has been signed yet.`,
+        `Price: ${formatUsd(probe.terms.amount)} in ${assetName}, which is ${plural(
+          billed,
+          'creator',
+          'creators',
+        )} at one cent each. That is the whole negotiation, and it arrived with the 402.`,
       ]),
     });
   } else {
@@ -545,31 +607,37 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
 /**
  * How many creators this payment credited. The seller records attribution from
  * the rows it actually served, so this is the number the ledger will show.
+ *
+ * Posts and catalog rows carry an `attribution.creatorId`, which is the account
+ * the cent goes to. For a borrowed sound that is the owner of the audio rather
+ * than the account that published the post, and for audio nobody here owns it is
+ * null. Reading the id off the label is what keeps the receipt's count equal to
+ * the seller's invoice.
  */
 function creditedCount(trace: RequestTrace, shape: PayloadShape): number {
   const body = asRecord(trace.body);
   if (!body) return 0;
   if (shape === 'profile') return body.id ? 1 : 0;
-  if (Array.isArray(body.creators)) return body.creators.length;
-  if (Array.isArray(body.posts)) {
-    const ids = new Set<string>();
-    for (const entry of body.posts) {
-      const row = asRecord(entry);
-      if (row && row.creatorId) ids.add(String(row.creatorId));
-    }
-    return ids.size;
+  const listings = Array.isArray(body.creators);
+  const rows = listings
+    ? (body.creators as unknown[])
+    : Array.isArray(body.posts)
+      ? (body.posts as unknown[])
+      : Array.isArray(body.tracks)
+        ? (body.tracks as unknown[])
+        : [];
+  const ids = new Set<string>();
+  for (const entry of rows) {
+    const row = asRecord(entry);
+    if (!row) continue;
+    const attribution = asRecord(row.attribution);
+    // A listing row is the creator. Every other row says who the credit goes to.
+    const credited = typeof attribution?.creatorId === 'string' ? attribution.creatorId : null;
+    const ownId = listings && typeof row.id === 'string' ? row.id : null;
+    const id = credited ?? ownId;
+    if (id) ids.add(id);
   }
-  if (Array.isArray(body.tracks)) {
-    const ids = new Set<string>();
-    for (const entry of body.tracks) {
-      const row = asRecord(entry);
-      if (row && Array.isArray(row.creatorIds)) {
-        for (const id of row.creatorIds) ids.add(String(id));
-      }
-    }
-    return ids.size;
-  }
-  return 0;
+  return ids.size;
 }
 
 /**
@@ -591,8 +659,8 @@ function pageSummary(spec: EndpointSpec, q: string | null, page: PageMeta | unde
   // page of one is common on a narrow search, and "1 creators" reads as a bug.
   const scope = q ? ` ${spec.noun} matching “${q}”` : ` ${spec.noun}`;
   return pick([
-    `That is ${formatCount(returned)} of ${formatCount(total)}${scope}. ${formatCount(remaining)} more are behind the cursor, still one cent a page.`,
-    `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The rest are one cent away, and the next-page chip carries the cursor.`,
+    `That is ${formatCount(returned)} of ${formatCount(total)}${scope}. ${formatCount(remaining)} more are behind the cursor, one cent each.`,
+    `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The next-page chip carries the cursor, and that page is priced the same way, one cent per creator.`,
   ]);
 }
 
@@ -654,8 +722,8 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
       kind: 'text',
       text: rows
         ? pick([
-            `${plural(rows, 'creator', 'creators')} on this page, each with a share of the cent.`,
-            `${plural(rows, 'public account', 'public accounts')} returned. The 60/40 split runs per creator on the page, not per request.`,
+            `${plural(rows, 'creator', 'creators')} on this page, billed one cent each.`,
+            `${plural(rows, 'public account', 'public accounts')} returned. Each one is billed a whole cent and keeps 60 percent of it; the platform keeps the rest.`,
           ])
         : pick([
             'No public creator matches that query. Every public account is in the dataset, so the query is the only filter.',
@@ -667,8 +735,8 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
       kind: 'text',
       text: rows
         ? pick([
-            `${plural(rows, 'post', 'posts')} on this page, credited across ${plural(credits, 'creator', 'creators')}.`,
-            `${plural(rows, 'public post', 'public posts')} returned, newest first, with the creators behind them paid.`,
+            `${plural(rows, 'post', 'posts')} on this page, credited across ${plural(credits, 'creator', 'creators')} at one cent each.`,
+            `${plural(rows, 'public post', 'public posts')} returned, newest first. Only original posts are credited to their author; a post that borrows someone else's sound credits the artist who owns it, and audio nobody on Streamlivr owns is retained by the platform.`,
           ])
         : 'No public post matches that query. Titles, captions and tags are all searched.',
     });
@@ -677,8 +745,8 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
       kind: 'text',
       text: rows
         ? pick([
-            `${plural(rows, 'track', 'tracks')}, credited across ${plural(credits, 'creator', 'creators')}.`,
-            `${plural(rows, 'track', 'tracks')} returned with cover art and the creators who own each one. The 60/40 split runs per creator, not per request.`,
+            `${plural(rows, 'track', 'tracks')}, one cent per credited artist, not one cent for the page.`,
+            `${plural(rows, 'track', 'tracks')} returned with cover art. A track credits the artist who owns it when that artist is on Streamlivr; a commercial recording nobody here owns is retained by the platform instead.`,
           ])
         : pick([
             'The catalog came back empty for that query. Titles, creators and ISRCs are searched.',
@@ -1170,42 +1238,67 @@ const moveExplain: Move = {
           'The seller returns 200 with the data and a payment-response header carrying the transaction hash.',
         ],
         split: 'Each settled payment is split 60% to the creators whose data was served and 40% to the platform.',
-        note: 'Payment is per page, not per subscription. A page costs the same cent whether the search matches fifty rows or five thousand.',
+        note: 'Payment is per creator credited, not per page and not per subscription. A page that credits ten creators costs ten cents, and a page that matches nothing costs nothing.',
       },
     });
     return {};
   },
 };
 
+/**
+ * The seller's published price list, read at most once per session.
+ *
+ * Cached as a promise rather than a value so two clicks in quick succession
+ * share one request. A deployment that does not answer the route resolves to
+ * null and the move falls back to the rule written beside it.
+ */
+let pricingRead: Promise<PricingResponse | null> | null = null;
+
+function readPricing(): Promise<PricingResponse | null> {
+  pricingRead ??= fetchPricing();
+  return pricingRead;
+}
+
 const moveEndpoints: Move = {
   id: 'endpoints',
   label: "What's for sale",
-  hint: 'Four paid routes and their prices.',
+  hint: 'The paid routes and what a page costs.',
   group: 'about',
   async run(_ctx, emit) {
+    // Read live where the deployment answers it, so the table cannot drift from
+    // what the seller actually charges.
+    const pricing = await readPricing();
     emit({
       kind: 'payload',
       title: 'Agent-facing routes',
       shape: 'generic',
       endpoint: 'endpoints',
       data: {
-        routes: [
+        routes: pricing?.routes ?? [
           { path: '/api/v1/agent/ping', price: '0.01', returns: 'Settlement liveness check' },
-          { path: '/api/v1/agent/listings', price: '0.01', returns: 'Public creator listings, searchable and paged' },
-          { path: '/api/v1/agent/posts', price: '0.01', returns: 'Public posts: captions, tags, media, engagement' },
-          { path: '/api/v1/agent/catalog', price: '0.01', returns: 'Music catalog metadata' },
-          { path: '/api/v1/agent/creator/:id', price: '0.01', returns: 'One creator profile' },
+          { path: '/api/v1/agent/listings', price: '0.01 each', returns: 'Creator and brand profiles, searchable and paged' },
+          { path: '/api/v1/agent/posts', price: '0.01 each', returns: 'Public content: titles, captions, tags, media, engagement' },
+          { path: '/api/v1/agent/catalog', price: '0.01 each', returns: 'Music and audio metadata, ISRC, artwork' },
+          { path: '/api/v1/agent/creator/:id', price: '0.01', returns: 'One creator or brand profile' },
           { path: '/api/v1/agent/stats', price: 'free', returns: 'How much is behind the paywall' },
+          { path: '/api/v1/agent/pricing', price: 'free', returns: 'The price rule, read live' },
           { path: '/api/v1/agent/demo/settlements', price: 'free', returns: 'The public ledger page' },
         ],
-        note: 'Every paid route costs the same: one cent, written as 10000 in token base units (six decimals). Each route also takes ?q=, ?limit= and ?cursor=.',
+        note:
+          pricing?.rule.summary ??
+          'One cent in USDC per creator credited, one cent minimum per request, so a page that credits 50 creators costs $0.50. Each data route takes ?q=, ?limit= and ?cursor=, and the 402 states the exact amount for the page before anything is signed.',
+        asset: pricing ? `${pricing.asset.symbol} on ${pricing.asset.network}` : undefined,
+        maximum: pricing ? `${formatUsd(pricing.maximumAtomic)} per request` : undefined,
+        free: pricing?.rule.notCharged,
+        examples: pricing?.examples,
       },
     });
     emit({
       kind: 'text',
       text: pick([
-        'Every public account and every public post is available; there is no per-creator switch to wait on. A creator can revoke agent access, and then all three data routes drop them at once.',
-        'The dataset is what the app already shows anyone. A creator who revokes access disappears from listings, posts and the catalog, and the profile route answers 404.',
+        'The dataset is African and global creator, brand, music and content metadata: public profiles, public posts and catalogued recordings, with each row labelled by who it credits.',
+        'What is for sale is what the app already shows anyone: public profiles, public content and music metadata. Nothing private is reachable from a paid route.',
+        'Only original work credits a creator. A post that borrows another creator\u2019s sound credits the artist who owns that sound, and a commercial recording nobody on Streamlivr owns is retained by the platform.',
       ]),
     });
     return {};

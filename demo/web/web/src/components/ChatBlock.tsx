@@ -54,16 +54,18 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
   /**
    * One on-chain transfer, then a ledger entry per creator.
    *
-   * The buyer signs a single transfer to the platform wallet. The 60/40 split
-   * happens in the ledger, and creators are paid in batches once their balance
-   * clears the payout minimum, so the pill must not read as if fifty transfers
-   * left the wallet at once.
+   * The buyer signs a single transfer to the platform wallet, and the amount is
+   * one cent per creator the page credited. The 60/40 split happens in the
+   * ledger, and creators are paid in batches once a balance clears the payout
+   * minimum, so the pill must not read as if fifty transfers left the wallet at
+   * once or as if a page-wide cent was shared between fifty people.
    */
+  const perCreator = 'one cent each';
   const credited =
     block.credited > 1
-      ? `${block.credited} creators credited in the ledger`
+      ? `${block.credited} creators credited, ${perCreator}`
       : block.credited === 1
-        ? '1 creator credited in the ledger'
+        ? `1 creator credited, ${perCreator}`
         : '';
 
   return (
@@ -92,8 +94,8 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
       </div>
       {credited && (
         <p className="px-1 text-[11.5px] leading-relaxed text-slate-500">
-          One transfer to the platform wallet, {credited}. Payouts to creators leave in batches once a balance clears
-          the payout minimum.
+          One on-chain transfer to the platform wallet, {credited}. The split and the creator balances live in the
+          ledger beside it, and payouts leave in batches once a balance clears the payout minimum.
         </p>
       )}
     </div>

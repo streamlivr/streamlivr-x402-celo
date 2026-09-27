@@ -78,11 +78,18 @@ export const BURNER_PRIVATE_KEY = (process.env.NEXT_PUBLIC_BURNER_PRIVATE_KEY ??
 
 export const BURNER_LABEL = process.env.NEXT_PUBLIC_BURNER_LABEL ?? 'demo burner';
 
-/** Hard ceiling on a single payment, in atomic units of the settlement asset. */
-export const MAX_ATOMIC_PER_REQUEST = Number(process.env.NEXT_PUBLIC_MAX_ATOMIC_PER_REQUEST ?? '10000');
+/**
+ * Hard ceiling on a single payment, in atomic units of the settlement asset.
+ *
+ * A page costs one cent per creator it credits, so a search that returns a
+ * hundred creators is a one dollar invoice. The ceiling has to sit above that
+ * and below the seller's own maximum, or the demo would refuse to sign the
+ * invoices its own search produces.
+ */
+export const MAX_ATOMIC_PER_REQUEST = Number(process.env.NEXT_PUBLIC_MAX_ATOMIC_PER_REQUEST ?? '1000000');
 
 /** Ceiling for one browser session, so a loop cannot drain the burner. */
-export const MAX_ATOMIC_PER_SESSION = Number(process.env.NEXT_PUBLIC_MAX_ATOMIC_PER_SESSION ?? '200000');
+export const MAX_ATOMIC_PER_SESSION = Number(process.env.NEXT_PUBLIC_MAX_ATOMIC_PER_SESSION ?? '5000000');
 
 /** Mainnet stays off unless it is explicitly enabled at build time. */
 export const MAINNET_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MAINNET === 'true';

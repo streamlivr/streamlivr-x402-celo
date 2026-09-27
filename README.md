@@ -33,8 +33,8 @@ Set five values in `.env.local`:
 NEXT_PUBLIC_API_BASE_URL=https://api.streamlivr.com
 NEXT_PUBLIC_BURNER_PRIVATE_KEY=0x...        # a throwaway key you fund
 NEXT_PUBLIC_ENABLE_MAINNET=true             # false keeps the page on Celo Sepolia
-NEXT_PUBLIC_MAX_ATOMIC_PER_REQUEST=10000    # $0.01, checked before anything is signed
-NEXT_PUBLIC_MAX_ATOMIC_PER_SESSION=200000   # $0.20 for one browser session
+NEXT_PUBLIC_MAX_ATOMIC_PER_REQUEST=1000000  # $1.00, checked before anything is signed
+NEXT_PUBLIC_MAX_ATOMIC_PER_SESSION=5000000  # $5.00 for one browser session
 ```
 
 ```bash
@@ -43,15 +43,22 @@ npm run dev        # http://localhost:3008
 ```
 
 The page opens on Celo mainnet. The suggestion chips are read live from the seller's free inventory
-route, so they name tags and countries that are actually in the catalogue. Type a search, for
-example a city, a tag, a track title or its creator, and the chat picks the dataset, buys one page, and offers the
-next page plus the same query in another dataset as follow-up chips. The chat first probes the route
-and shows the invoice it got back, then signs the authorization in the background and repeats the
-call with the payment header. Nothing pops up, because the burner key lives in the
-bundle. The reply arrives with the settlement transaction hash, and `Payout ledger` in the header
-shows the same payment split 60/40 between the creators and the platform. On chain that settlement is
-one USDC transfer to the platform wallet. The 60/40 split is recorded in the ledger against every
-creator the page served, and those balances leave in batches once they clear the payout minimum.
+route, so they name tags and countries that are actually in the catalogue.
+
+You can also type a sentence. "who is making amapiano in Lagos" and "what does a page cost" go to
+`POST /api/v1/agent/chat/interpret`, a free route that reads the sentence with the same language
+model the Streamlivr app uses for its support chat. The route returns one call, the page makes it
+with the burner wallet, and the conversation stays in the browser. The model key stays on the
+server. Run the demo without one and the page reads the sentence itself, so the chat works either
+way.
+
+The chat first probes the route and shows the invoice it got back, then signs the authorization in
+the background and repeats the call with the payment header. Nothing pops up, because the burner key
+lives in the bundle. The reply arrives with the settlement transaction hash, and `Payout ledger` in
+the header shows the same payment split 60/40 between the creators and the platform. On chain that
+settlement is one USDC transfer to the platform wallet. The 60/40 split is recorded in the ledger
+against every creator the page credited, and those balances leave in batches once they clear the
+payout minimum.
 
 **Funding the burner.** The key ships inside the browser bundle, so treat it as public and keep it
 small. Send Celo mainnet USDC to the address printed at the top of `.env.local`; $0.05 covers a long
@@ -76,17 +83,19 @@ to read in one sitting.
 cp .env.example .env
 # set X402_API_KEY and X402_PAY_TO, leave X402_NETWORK=testnet for a first run
 npm install
-npm test           # 84 unit tests, no network access needed
+npm test           # 135 unit tests, no network access needed
 npm run demo       # seller on http://127.0.0.1:3000
 ```
 
 | Route | Price | Returns | Attribution |
-|---|---:|---|---|
+|---|---|---|---|
 | `GET /api/v1/agent/ping` | `10000` | Liveness check that proves settlement works | none |
-| `GET /api/v1/agent/listings` | `10000` | Public creator listings, searchable and paged | each creator on the page |
-| `GET /api/v1/agent/posts` | `10000` | Public posts: captions, tags, media, engagement | each creator whose post is on the page |
-| `GET /api/v1/agent/catalog` | `10000` | Catalog metadata with the creators behind each track | each creator behind the tracks on the page |
+| `GET /api/v1/agent/listings` | `10000` each | Public creator listings, searchable and paged | every creator on the page |
+| `GET /api/v1/agent/posts` | `10000` each | Public posts: captions, tags, media, engagement | the owner of the audio on each post |
+| `GET /api/v1/agent/catalog` | `10000` each | Catalog metadata with the owner of each recording | the artist who owns each recording |
 | `GET /api/v1/agent/creator/:id` | `10000` | One public profile with their public counts | that creator |
+| `GET /api/v1/agent/pricing` | free | The price rule, the asset and worked examples | none |
+| `POST /api/v1/agent/chat/interpret` | free | Turns a visitor sentence into one call | none |
 | `GET /api/v1/agent/stats` | free | How many creators, posts and tracks there are, and the busiest tags | none |
 | `GET /.well-known/agent.json` | free | A2A agent card with prices and the ERC-8004 identity | none |
 | `GET /.well-known/mcp.json` | free | MCP server card listing the same routes as tools | none |
@@ -99,8 +108,31 @@ npm run demo       # seller on http://127.0.0.1:3000
 
 ### Every public row, one page at a time
 
-The three data routes carry `?q=`, `?limit=` and `?cursor=`, and the price does not change with any
-of them: a page costs one cent whether it returns fifty rows or the maximum two hundred.
+The three data routes carry `?q=`, `?limit=` and `?cursor=`. A request costs **one cent per creator
+it credits**, with a one cent minimum, so the price follows the page rather than the route. A page
+that credits three creators costs `30000`, a page that credits fifty costs `500000`, and the
+ceiling is `2000000` for the two hundred creators the routes will credit in one request. A page
+that matches nothing costs nothing.
+
+That is why `limit` is the cost control and why the seller prices the invoice from the page it is
+about to serve. The quote and the rows cannot disagree: `src/x402/pagePlan.ts` resolves the page
+once, the 402 is priced from it, and the 200 serves that same page.
+
+**What a row pays.** The credits follow the work, not the account that published it.
+
+| The row | Who is credited |
+|---|---|
+| A post with the publisher's own recording | the publisher |
+| A post carrying another creator's sound | the creator who owns the sound |
+| A post whose audio is a commercial recording | the artist, when that artist has a Streamlivr account |
+| Audio nobody on Streamlivr owns | nobody; the platform keeps that cent |
+| A catalog recording owned by a creator | the owner |
+| A catalog recording with no owner here | nobody; the platform keeps that cent |
+
+Every post and catalog row says which of these it is, in a `label` block and an `attribution` note
+the buyer can read without knowing the rule. Using a track is not owning it, so the creators whose
+posts drew on a recording are never the people that recording pays. `src/x402/ownership.ts` is the
+rule, in one file, with tests, and both the production API and the reference server call it.
 
 `q` matches the fields that route actually holds. Listings match username, display name, bio, country
 (code or name), and the hashtags on that creator's public posts, so "amapiano creators" reaches the
@@ -194,15 +226,19 @@ neither can do anything useful without settlement.
 ## What one payment does
 
 1. An agent asks for a paid route with no payment and gets `402` plus the invoice in the
-   `payment-required` header.
+   `payment-required` header. The amount is one cent per creator that request would credit.
 2. It signs an EIP-3009 `TransferWithAuthorization` off-chain. No approval transaction, no gas.
 3. It repeats the request with the `payment-signature` header.
 4. The seller asks the Celo facilitator to verify the signature, then to settle it.
-5. USDC moves from the buyer to `X402_PAY_TO` inside the token contract. The facilitator never holds
-   the funds.
-6. The seller stores the settlement, splits 60% to the creators returned by that endpoint and 40%
-   to the platform, and replies with the data plus a `payment-response` header holding the
-   transaction hash.
+5. USDC moves from the buyer to `X402_PAY_TO` inside the token contract, in one transfer. The
+   facilitator never holds the funds.
+6. The seller stores the settlement and splits 60% to the creators the page credited and 40% to the
+   platform, one ledger row per credited creator, then replies with the data plus a
+   `payment-response` header holding the transaction hash.
+
+One on-chain transfer, many ledger rows. A page that credits fifty creators is one USDC transfer to
+the platform wallet and fifty balances the payout job settles later, each of them a whole cent
+before the split.
 
 Repeat the same signed payload and the stored response comes back instead of a second charge. The
 authorization nonce is single-use, so a second settlement would fail anyway.

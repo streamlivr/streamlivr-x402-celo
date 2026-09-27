@@ -2,34 +2,46 @@
 
 import { useState } from 'react';
 import { ArrowUp } from 'lucide-react';
-import { interpretQuery, type Move } from '@/lib/intents';
+import { resolveMove, type Move } from '@/lib/intents';
 
 export function Composer({
   options,
   busy,
+  history,
   onPick,
 }: {
   options: Move[];
   busy: boolean;
+  history: { role: 'user' | 'agent'; text: string }[];
   onPick: (move: Move) => void;
   onReset: () => void;
   networkLabel: string;
   sessionSpentLabel: string;
 }) {
   const [typedText, setTypedText] = useState('');
+  // The interpreter is one round trip to the seller. Without a visible state
+  // the input looks ignored for the second it takes, so the send button shows
+  // it and the line under the bar explains it.
+  const [interpreting, setInterpreting] = useState(false);
 
   /**
-   * The same interpretation the empty state and the chips use. Search terms
-   * survive: "amapiano posts" searches posts, "lagos" searches creators, and
-   * "Music & Me by Nate Dogg" searches the catalogue by title and creator.
+   * The seller's model reads the sentence and picks the call; when the model is
+   * unavailable the page's own reader does. Either way the text the visitor
+   * typed is what the transcript shows, and the call that follows is the one
+   * they can watch being priced.
    */
-  const handleTextSubmit = (e: React.FormEvent) => {
+  const handleTextSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy || !typedText.trim()) return;
-    const move = interpretQuery(typedText, options);
-    if (move) {
-      onPick({ ...move, label: typedText.trim() });
-      setTypedText('');
+    const text = typedText.trim();
+    if (busy || interpreting || !text) return;
+    setInterpreting(true);
+    setTypedText('');
+    try {
+      const move = await resolveMove(text, options, history);
+      if (move) onPick({ ...move, label: text });
+      else setTypedText(text);
+    } finally {
+      setInterpreting(false);
     }
   };
 
@@ -66,17 +78,21 @@ export function Composer({
             value={typedText}
             onChange={(e) => setTypedText(e.target.value)}
             placeholder="Search creators, posts and tracks, or ask what it costs"
-            disabled={busy}
+            disabled={busy || interpreting}
             className="w-full border-none bg-transparent px-3 py-2 text-sm leading-relaxed text-white placeholder-slate-500 focus:outline-none focus:ring-0"
           />
 
           <button
             type="submit"
-            disabled={busy || !typedText.trim()}
+            disabled={busy || interpreting || !typedText.trim()}
             aria-label="Send query"
             className="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(0,218,248,0.3)] transition-all hover:bg-cyan-300 active:scale-95 disabled:opacity-40"
           >
-            <ArrowUp size={16} strokeWidth={2.5} />
+            {interpreting ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-950/30 border-t-slate-950" />
+            ) : (
+              <ArrowUp size={16} strokeWidth={2.5} />
+            )}
           </button>
         </form>
 
