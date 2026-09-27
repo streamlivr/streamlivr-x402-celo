@@ -62,12 +62,11 @@ import {
 } from '../src/x402/config.js';
 import {
   buildPaidRoutes,
-  emptyPageKey,
+  noChargePage,
   examplePath,
   routePattern,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
-  PAGE_BODY_KEYS,
 } from '../src/x402/catalog.js';
 import { encodeCursor, readPageQuery, type PageInfo, type PageRequest } from '../src/x402/paging.js';
 import { MAX_REQUEST_PRICE_ATOMIC, PRICE_EXAMPLES, PRICE_RULE, creatorsPaidFor, priceForCreatorCount } from '../src/x402/pricing.js';
@@ -1199,15 +1198,10 @@ async function main() {
     // A search that matched nothing is not worth a cent, so the page is served
     // unpaid and the response says so. The buyer's signed authorization was
     // never submitted, which is why there is no receipt to show.
-    const emptyKey = emptyPageKey(state.adapter.getPath(), Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload ?? ''));
-    if (emptyKey) {
-      reply.header('x-no-charge', 'empty-page');
-      reply.header('x-no-charge-reason', `the ${emptyKey} query matched nothing`);
-      return payload;
-    }
-    if (PAGE_BODY_KEYS[state.adapter.getPath()] && request.x402CreatorIds?.length === 0) {
-      reply.header('x-no-charge', 'no-creator-credit');
-      reply.header('x-no-charge-reason', 'no creator credit on this page');
+    const noCharge = noChargePage(state.adapter.getPath(), Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload ?? ''), request.x402CreatorIds);
+    if (noCharge) {
+      reply.header('x-no-charge', noCharge.code);
+      reply.header('x-no-charge-reason', noCharge.reason);
       return payload;
     }
     const settled = await httpServer.processSettlement(

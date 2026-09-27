@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyPageKey, PAGE_BODY_KEYS } from './catalog.js';
+import { emptyPageKey, noChargePage, PAGE_BODY_KEYS } from './catalog.js';
 
 /**
  * The empty-page rule is the difference between a paid API and a trap. These
@@ -32,5 +32,16 @@ describe('empty page detection', () => {
     // evidence of an empty page.
     expect(emptyPageKey('/api/v1/agent/ping', JSON.stringify({ ok: true }))).toBeNull();
     expect(emptyPageKey('/api/v1/agent/listings', 'not json')).toBeNull();
+  });
+
+  it('does not settle a page with rows but no creator credit', () => {
+    const body = JSON.stringify({ tracks: [{ id: 'unowned' }] });
+    expect(noChargePage('/api/v1/agent/catalog', body, [])).toEqual({
+      code: 'no-creator-credit',
+      reason: 'no creator credit on this page',
+    });
+    expect(noChargePage('/api/v1/agent/catalog', body, ['creator-a'])).toBeNull();
+    expect(noChargePage('/api/v1/agent/catalog', body, undefined)?.code).toBe('no-creator-credit');
+    expect(noChargePage('/api/v1/agent/ping', JSON.stringify({ ok: true }), [])).toBeNull();
   });
 });

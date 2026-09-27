@@ -75,6 +75,16 @@ export function emptyPageKey(path: string, payload: string): string | null {
   return null;
 }
 
+/** A page without rows or credited creators is served without settlement. */
+export function noChargePage(path: string, payload: string, creatorIds: string[] | undefined): { code: string; reason: string } | null {
+  const emptyKey = emptyPageKey(path, payload);
+  if (emptyKey) return { code: 'empty-page', reason: `the ${emptyKey} query matched nothing` };
+  if (PAGE_BODY_KEYS[path] && !creatorIds?.length) {
+    return { code: 'no-creator-credit', reason: 'no creator credit on this page' };
+  }
+  return null;
+}
+
 export interface PaidRoutePathParam {
   name: string;
   description: string;
