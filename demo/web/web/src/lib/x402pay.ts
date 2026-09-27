@@ -335,7 +335,11 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     const requested = Number(terms.amount);
     if (Number.isFinite(requested) && requested > options.maxAtomicPerRequest) {
       return {
-        ...blankTrace(options.path, started, `invoice is ${terms.amount} atomic, above the ${options.maxAtomicPerRequest} cap`),
+        ...blankTrace(
+          options.path,
+          started,
+          `This page costs $${(requested / 1_000_000).toFixed(2)}, above the demo's $${(options.maxAtomicPerRequest / 1_000_000).toFixed(2)} per-request limit. Nothing was signed.`,
+        ),
         status: 402,
         challenge,
         terms,

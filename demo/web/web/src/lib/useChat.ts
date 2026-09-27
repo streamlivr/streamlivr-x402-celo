@@ -28,8 +28,8 @@ export interface AgentTurn {
 
 export type Turn = UserTurn | AgentTurn;
 
-/** A hung request must never leave the composer disabled with no way out. */
-const MOVE_WATCHDOG_MS = 60_000;
+/** Allow the 15-second quote and 90-second settlement timeouts to finish first. */
+const MOVE_WATCHDOG_MS = 120_000;
 
 let counter = 0;
 function nextId(prefix: string): string {
@@ -177,7 +177,7 @@ export function useChat(burnerKey: string) {
 
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       const stalled = new Promise<never>((_, reject) => {
-        watchdog = setTimeout(() => reject(new Error('That request never came back, so it was stopped.')), MOVE_WATCHDOG_MS);
+        watchdog = setTimeout(() => reject(new Error('The request is still unresolved. Check the ledger before trying again.')), MOVE_WATCHDOG_MS);
       });
 
       try {

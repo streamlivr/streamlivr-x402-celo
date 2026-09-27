@@ -637,7 +637,9 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
       text: trace.error
         ? `The payment did not complete: ${trace.error}`
         : `The seller answered ${trace.status} after the payment, so the data was not served.`,
-      hint: 'Nothing was charged for a request that failed. Session totals only count settled payments.',
+      hint: trace.error?.includes('per-request limit')
+        ? 'Try a smaller page.'
+        : 'The payment status may be unknown. Check the ledger before trying again.',
     });
     return { lastTrace: trace, next: nextMoves(ctx, trace) };
   }
