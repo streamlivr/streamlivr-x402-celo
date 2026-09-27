@@ -49,6 +49,11 @@ describe('paid route pagination', () => {
     expect(long.info.nextCursor).toBe(encodeCursor({ id: 'b' }));
     expect(long.info.total).toBe(10);
     expect(long.info.truncated).toBe(true);
+
+    const finalPage = buildPageInfo([{ id: 'c' }], 3, 2, (row) => ({ id: row.id }));
+    expect(finalPage.info.total).toBe(3);
+    expect(finalPage.info.hasMore).toBe(false);
+    expect(finalPage.info.truncated).toBe(false);
   });
 
   it('asks for one row more than the caller requested', () => {

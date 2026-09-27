@@ -518,7 +518,7 @@ function pageOf<T extends { id: string }>(
       returned: visible.length,
       hasMore,
       nextCursor: hasMore && last ? encodeCursor(cursorFor(last)) : null,
-      truncated: rows.length > visible.length,
+      truncated: hasMore,
     },
   };
 }

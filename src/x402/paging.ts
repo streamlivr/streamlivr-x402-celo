@@ -35,7 +35,7 @@ export interface PageInfo {
   returned: number;
   hasMore: boolean;
   nextCursor: string | null;
-  /** True when the filter matches more rows than this page returned. */
+  /** True when another page follows this one. */
   truncated: boolean;
 }
 
@@ -127,7 +127,7 @@ export function buildPageInfo<T>(
       returned: visible.length,
       hasMore: overflow,
       nextCursor: cursorValues ? encodeCursor(cursorValues) : null,
-      truncated: total > visible.length,
+      truncated: overflow,
     },
   };
 }
