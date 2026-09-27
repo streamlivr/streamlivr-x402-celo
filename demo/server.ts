@@ -67,6 +67,7 @@ import {
   routePattern,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
+  PAGE_BODY_KEYS,
 } from '../src/x402/catalog.js';
 import { encodeCursor, readPageQuery, type PageInfo, type PageRequest } from '../src/x402/paging.js';
 import { MAX_REQUEST_PRICE_ATOMIC, PRICE_EXAMPLES, PRICE_RULE, creatorsPaidFor, priceForCreatorCount } from '../src/x402/pricing.js';
@@ -1202,6 +1203,11 @@ async function main() {
     if (emptyKey) {
       reply.header('x-no-charge', 'empty-page');
       reply.header('x-no-charge-reason', `the ${emptyKey} query matched nothing`);
+      return payload;
+    }
+    if (PAGE_BODY_KEYS[state.adapter.getPath()] && request.x402CreatorIds?.length === 0) {
+      reply.header('x-no-charge', 'no-creator-credit');
+      reply.header('x-no-charge-reason', 'no creator credit on this page');
       return payload;
     }
     const settled = await httpServer.processSettlement(

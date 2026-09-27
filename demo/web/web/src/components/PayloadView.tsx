@@ -158,11 +158,8 @@ function PostCard({ post, index }: { post: PostRow; index: number }) {
           </div>
         </div>
       </div>
-      {/* Whose audio this post carries, and therefore who the cent pays. A
-          borrowed sound credits its owner; audio nobody here owns stays with
-          the platform. Saying so on the row is what stops a buyer reading the
-          payout ledger as "the poster was paid for this". */}
-      {audio && (
+      {/* Only show attribution when the audio credits a creator. */}
+      {audio && post.attribution?.creatorId && (
         <div className="border-t border-white/[0.05] px-3.5 py-2.5 sm:px-4">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-slate-500">
             <Music2 size={12} />
@@ -173,11 +170,6 @@ function PostCard({ post, index }: { post: PostRow; index: number }) {
               <span className="text-emerald-300/90">
                 Borrowed sound{audio.soundTitle ? ` (${audio.soundTitle})` : ''}, credited to{' '}
                 {owner ?? 'the artist who owns it'}, not the account that used it.
-              </span>
-            )}
-            {audio.ownership === 'commercial' && (
-              <span className="text-amber-300/90">
-                {post.attribution?.note ?? 'Audio with no Streamlivr owner on this row, so this cent stays with the platform.'}
               </span>
             )}
           </span>
@@ -302,15 +294,10 @@ function TrackCard({ track, index }: { track: TrackRow; index: number }) {
             </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-slate-400">
-            {owned ? (
+            {owned && (
               <span className="inline-flex items-center gap-1 text-emerald-300">
                 <BadgeCheck size={12} />
                 {owner ? `credited to ${owner}` : 'credited to a creator'}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-amber-300">
-                <BadgeCheck size={12} />
-                no Streamlivr owner, the platform keeps this one
               </span>
             )}
             {track.isrc && (
@@ -330,12 +317,14 @@ function TrackCard({ track, index }: { track: TrackRow; index: number }) {
           </div>
         </div>
       </div>
-      <div className="border-t border-white/[0.05] px-3.5 py-2.5 sm:px-4">
-        <span className="flex items-center gap-2 text-[11.5px] text-slate-500">
-          <Music2 size={12} />
-          {track.attribution?.note ?? 'Metadata only: artwork, ISRC, and the creator who owns the recording.'}
-        </span>
-      </div>
+      {track.attribution?.creatorId && (
+        <div className="border-t border-white/[0.05] px-3.5 py-2.5 sm:px-4">
+          <span className="flex items-center gap-2 text-[11.5px] text-slate-500">
+            <Music2 size={12} />
+            {track.attribution.note}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -823,7 +812,7 @@ export function PayloadView({
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
           {q
-            ? `No track matches “${q}”. Titles and creators are matched token by token, so a full song title still finds its row.`
+            ? `No track matches “${q}”. Try a shorter title or an artist name.`
             : 'No track came back for this page.'}
         </div>
       );

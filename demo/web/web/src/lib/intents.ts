@@ -95,10 +95,6 @@ function pick<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)] as T;
 }
 
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
 /**
  * Shows what the agent is doing while a slow request is in flight, and moves
  * the line on as the wait continues. Settlement on Celo takes several seconds,
@@ -194,8 +190,8 @@ const DEFAULT_PAGE_ROWS = 10;
  *
  * This is the whole client half of the paging contract: the datasets hold
  * thousands of rows, so a page is what a cent buys. `cursor` is opaque. The
- * seller mints it and the seller validates it, and the price does not change
- * with `q`, `limit` or `cursor`. The invoice changes size, never shape.
+ * seller mints it and the seller validates it. The selected rows determine
+ * the price, so each page gets a fresh quote.
  */
 export function withQuery(path: string, params: { q?: string | null; cursor?: string | null } = {}): string {
   const search = new URLSearchParams();
@@ -204,19 +200,6 @@ export function withQuery(path: string, params: { q?: string | null; cursor?: st
   if (params.cursor) search.set('cursor', params.cursor);
   const suffix = search.toString();
   return suffix ? `${path}?${suffix}` : path;
-}
-
-/**
- * Creators an invoice paid for.
- *
- * The seller bills one cent per creator credited, so this many whole cents is
- * this many creators. Reading it back is how the chat can say what a page is
- * buying before the buyer signs, rather than only naming a total.
- */
-function creatorsBilled(amountAtomic: string): number {
-  const amount = Number(amountAtomic);
-  if (!Number.isFinite(amount) || amount <= 0) return 1;
-  return Math.max(1, Math.round(amount / 10000));
 }
 
 function pageOf(trace: RequestTrace): PageMeta | undefined {
@@ -528,15 +511,6 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
 
   if (probe.terms) {
     emit({ kind: 'invoice', terms: probe.terms, challenge: probe.challenge, mode: 'payable' });
-    const billed = creatorsBilled(probe.terms.amount);
-    emit({
-      kind: 'text',
-      text: `The seller wants ${formatUsd(probe.terms.amount)} in ${assetName} on ${
-        NETWORKS[ctx.network].label
-      }, which is ${plural(billed, 'creator', 'creators')} at one cent each, paid to ${shortAddress(
-        probe.terms.payTo,
-      )}. Nothing has been signed yet.`,
-    });
   } else {
     emit({
       kind: 'error',
@@ -544,6 +518,15 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
       hint: 'That usually means the seller is misconfigured, not that the payment failed.',
     });
     return { lastTrace: probe };
+  }
+
+  if (Number(probe.terms.amount) > MAX_ATOMIC_PER_REQUEST) {
+    emit({
+      kind: 'error',
+      text: `This page costs ${formatUsd(probe.terms.amount)}, but this demo build is limited to ${formatUsd(String(MAX_ATOMIC_PER_REQUEST))} per request. Nothing was signed.`,
+      hint: 'The demo operator needs to raise the build-time payment limit and redeploy.',
+    });
+    return { lastTrace: probe, next: nextMoves(ctx, probe) };
   }
 
   emit({
@@ -621,13 +604,9 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
   if (trace.status < 400 && !trace.receipt && trace.noChargeReason) {
     emit({
       kind: 'text',
-      text: 'That page came back empty, so nothing was charged and the cent stayed in the wallet.',
+      text: 'This page was served without a charge.',
     });
     emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: trace.body, endpoint: call.path });
-    emit({
-      kind: 'text',
-      text: `It would have cost ${formatUsd(trace.terms?.amount ?? '0')} with rows on it. Try a word that appears in a name, a title or a tag.`,
-    });
     return { lastTrace: trace, next: nextMoves(ctx, trace) };
   }
 
@@ -638,7 +617,7 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
         ? `The payment did not complete: ${trace.error}`
         : `The seller answered ${trace.status} after the payment, so the data was not served.`,
       hint: trace.error?.includes('per-request limit')
-        ? 'Try a smaller page.'
+        ? 'The demo operator needs to raise the build-time payment limit and redeploy.'
         : 'The payment status may be unknown. Check the ledger before trying again.',
     });
     return { lastTrace: trace, next: nextMoves(ctx, trace) };
@@ -1172,7 +1151,7 @@ const moveEndpoints: Move = {
     });
     emit({
       kind: 'text',
-      text: "The dataset is African and global creator, brand, music and content metadata: public profiles, public posts and catalogued recordings, with each row labelled by who it credits. Only original work pays a creator: a post that borrows another creator's sound pays the artist who owns that sound, and a commercial recording nobody on Streamlivr owns is retained by the platform.",
+      text: 'The dataset includes public creator profiles, posts and catalogued recordings. A post using another creator’s sound credits the sound owner; each paid row that credits a creator names them.',
     });
     return {};
   },
