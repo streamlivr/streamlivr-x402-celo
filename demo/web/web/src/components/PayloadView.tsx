@@ -37,28 +37,21 @@ interface PageMeta {
 }
 
 /**
- * "Showing 50 of 2,431, 2,381 more behind the cursor", above a list.
+ * Shows the size of the result set without treating a later page as the first.
  *
- * The dataset is thousands of rows, so a card that quietly showed fifty of them
+ * The dataset is thousands of rows, so a card that quietly showed ten of them
  * would read as "that is all there is". The cursor is named, because it is the
  * thing the next chip pays for.
  */
 function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string | null }) {
   if (!page || typeof page.total !== 'number' || page.total === 0) return null;
   const returned = page.returned ?? 0;
-  const remaining = Math.max(page.total - returned, 0);
   return (
     <p className="px-1 text-[12px] text-slate-500">
-      Showing <span className="tabular text-slate-400">{formatCount(returned)}</span> of{' '}
-      <span className="tabular text-slate-400">{formatCount(page.total)}</span> {noun}
+      <span className="tabular text-slate-400">{formatCount(returned)}</span> {noun} on this page ·{' '}
+      <span className="tabular text-slate-400">{formatCount(page.total)}</span> total
       {q ? <> matching “{q}”</> : null}
-      {page.hasMore && remaining > 0 ? (
-        <>
-          , <span className="tabular">{formatCount(remaining)}</span> more behind the cursor, one cent per creator.
-        </>
-      ) : (
-        ', and that is the whole result.'
-      )}
+      {page.hasMore ? '. Next page available.' : '. No more pages.'}
     </p>
   );
 }
@@ -232,7 +225,7 @@ function StatsCard({ data }: { data: Record<string, unknown> }) {
         </div>
       </div>
       <p className="px-1 text-[12px] text-slate-500">
-        This read is free: a buyer has to be able to see how much there is before deciding a page is worth a cent.
+        These are dataset totals. Paid requests return up to ten rows by default and quote one cent per credited creator on that page.
       </p>
     </div>
   );
@@ -653,6 +646,9 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
           A page costs one cent per creator it credits, with a one cent minimum per request.
         </p>
       )}
+      <p className="border-t border-white/[0.06] px-4 py-3 text-[12px] text-slate-400">
+        Data route prices are quotes for their first page of up to 10 rows. Each distinct creator credited on that page adds $0.01. The inventory totals cover all pages.
+      </p>
       {facts.length > 0 && (
         <dl className="flex flex-wrap gap-x-6 gap-y-2 border-t border-white/[0.06] px-4 py-3">
           {facts.map(([key, value]) => (

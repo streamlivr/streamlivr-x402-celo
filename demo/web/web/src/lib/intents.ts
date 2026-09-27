@@ -187,7 +187,7 @@ interface PageQuery {
 }
 
 /** Rows a page holds when the caller does not ask for a size. */
-const DEFAULT_PAGE_ROWS = 50;
+const DEFAULT_PAGE_ROWS = 10;
 
 /**
  * Put search and pagination in the query string.
@@ -836,7 +836,7 @@ const movePosts: Move = {
 const moveCatalog: Move = {
   id: 'catalog',
   label: 'Music catalog',
-  hint: 'One cent. Track metadata plus ownership.',
+  hint: 'One cent per creator credited, ten tracks a page.',
   group: 'discover',
   run: (ctx, emit) => buy(ctx, emit, { spec: ENDPOINTS.catalog, path: ENDPOINTS.catalog.path }),
 };
@@ -1283,15 +1283,11 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
 
   const cursor = page?.hasMore ? page.nextCursor : null;
   if (spec && spec.id !== 'ping' && cursor) {
-    const remaining = Math.max((page?.total ?? 0) - (page?.returned ?? 0), 0);
     const rows = page?.returned ?? DEFAULT_PAGE_ROWS;
     moves.push({
       id: `page:${spec.id}`,
       label: `Next ${rows} ${spec.noun}`,
-      hint:
-        remaining > 0
-          ? `${formatCount(remaining)} more behind the cursor. Priced the same way: one cent per creator that page credits.`
-          : 'The next page behind the cursor, priced at one cent per creator it credits.',
+      hint: `Continue through ${formatCount(page?.total ?? 0)} matching rows. One cent per creator credited on the next page.`,
       group: 'discover',
       run: (innerCtx, emit) =>
         buy(innerCtx, emit, {
