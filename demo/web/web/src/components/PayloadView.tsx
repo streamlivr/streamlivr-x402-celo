@@ -802,8 +802,8 @@ export function PayloadView({
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
           {q
-            ? `No public creator matches “${q}”. The dataset is every public account, so the query is the only filter.`
-            : 'The paid response came back empty. Every public account is available to agents, so this should not happen at this size.'}
+            ? `No public creator matches “${q}”. Try a username, a display name, or a two-letter country code.`
+            : 'No creator came back for this page.'}
         </div>
       );
     }
@@ -828,7 +828,7 @@ export function PayloadView({
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
           {q
             ? `No track matches “${q}”. Titles and creators are matched token by token, so a full song title still finds its row.`
-            : 'The catalog is empty. A track appears here once a public post draws on it.'}
+            : 'No track came back for this page.'}
         </div>
       );
     }

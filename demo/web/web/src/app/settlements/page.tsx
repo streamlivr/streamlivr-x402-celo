@@ -110,7 +110,8 @@ export default function SettlementsPage() {
           <div>
             <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-primary">Creator payout ledger</h1>
             <p className="mt-1.5 max-w-[62ch] text-[13.5px] leading-relaxed text-text-secondary">
-              Live record of micropayments delivered to creators on Celo. Read straight from the live database: nothing here is replayed or simulated.
+              Live record of x402 settlements and creator balances on Celo, read from the database the payouts run on.
+              Each row with an explorer link is a mainnet transaction.
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -165,7 +166,7 @@ export default function SettlementsPage() {
             <div>
               <h2 className="text-[15px] font-semibold text-text-primary">Payments</h2>
               <p className="text-[12.5px] text-text-secondary">
-                Newest first. Each row is one settled request with its creator split beside it.
+                Newest first. One settled request per row, with the creators it credited beside it.
               </p>
             </div>
             {settlements && (
@@ -261,10 +262,10 @@ export default function SettlementsPage() {
           <div className="mb-3">
             <h2 className="text-[15px] font-semibold text-text-primary">Creators and earnings</h2>
             <p className="text-[12.5px] text-text-secondary">
-              Every creator x402 has credited, biggest balance first. One page sold credits everyone it served, and a
-              page-wide split of a one cent payment leaves most of those balances below the payout minimum, so the
-              list opens on the top earners. A creator who revokes agent access keeps their settled history: a payment
-              that already happened is not undone by a later opt-out.
+              Every creator x402 has credited, biggest balance first. A page credits each creator it served at one cent
+              each, so a single page can leave dozens of balances under the payout minimum. The list opens on the top
+              earners. A creator who revokes agent access keeps their settled history: a payment that already happened
+              is not undone by a later opt-out.
             </p>
           </div>
 
@@ -275,7 +276,7 @@ export default function SettlementsPage() {
               <div className="p-4">
                 <EmptyState
                   title="No creator has been paid yet"
-                  description="Every public account is available to agents, so this list fills the moment the first page is bought. Nothing is hidden behind a consent gate."
+                  description="This list fills the moment a paid page credits someone. A creator with no sales does not appear here."
                 />
               </div>
             ) : (

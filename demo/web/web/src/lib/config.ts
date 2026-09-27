@@ -76,7 +76,7 @@ export const BURNER_PRIVATE_KEY = (process.env.NEXT_PUBLIC_BURNER_PRIVATE_KEY ??
   | `0x${string}`
   | '';
 
-export const BURNER_LABEL = process.env.NEXT_PUBLIC_BURNER_LABEL ?? 'demo burner';
+export const BURNER_LABEL = process.env.NEXT_PUBLIC_BURNER_LABEL ?? 'demo buyer wallet';
 
 /**
  * Hard ceiling on a single payment, in atomic units of the settlement asset.

@@ -109,7 +109,7 @@ export function PageHeader({
             <button
               type="button"
               onClick={handleCopyWallet}
-              title={copied ? 'Copied address!' : `Demo burner: ${burnerAddress || 'not configured'} (click to copy)`}
+              title={copied ? 'Copied address!' : `Demo buyer wallet: ${burnerAddress || 'not configured'} (click to copy)`}
               className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-xs shadow-sm transition-all hover:border-white/[0.14] active:scale-95 sm:gap-2 sm:px-3"
             >
               <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />

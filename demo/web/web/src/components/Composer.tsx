@@ -68,7 +68,6 @@ export function Composer({
           </div>
         )}
 
-        {/* Warm, Floating, Beautifully Crafted Input Bar */}
         <form
           onSubmit={handleTextSubmit}
           className="relative flex items-center rounded-2xl border border-white/[0.09] bg-[#131722]/90 p-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.4)] transition-all focus-within:border-cyan-400/40 focus-within:ring-1 focus-within:ring-cyan-400/30"
@@ -96,7 +95,6 @@ export function Composer({
           </button>
         </form>
 
-        {/* Frictionless Protocol Note */}
         <p className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[11px] font-light text-slate-400">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
           <span>Autonomous x402 micropayments on Celo</span>

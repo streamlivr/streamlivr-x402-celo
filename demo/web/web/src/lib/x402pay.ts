@@ -272,7 +272,7 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
   const profile = NETWORKS[options.network];
 
   if (!/^0x[0-9a-fA-F]{64}$/.test(options.burnerKey)) {
-    return blankTrace(options.path, started, 'burner wallet is not configured');
+    return blankTrace(options.path, started, 'the demo buyer wallet is not configured');
   }
 
   try {

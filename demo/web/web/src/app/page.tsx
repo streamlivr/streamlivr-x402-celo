@@ -134,18 +134,15 @@ export default function AgentCheckoutPage() {
       />
 
       {turns.length === 0 ? (
-        /* BEGIN: Empty State (Minimal, Human, Not Bulk, Not Robotic) */
         <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center px-4 py-12 sm:px-6">
 
-          {/* Clean Human Headline */}
           <h1 className="text-center font-display text-3xl font-bold tracking-tight text-white sm:text-5xl sm:leading-[1.18]">
-            Ask the catalog.{' '}
+            Search creators, posts and tracks.{' '}
             <span className="block bg-gradient-to-r from-white via-slate-100 to-[#00daf8] bg-clip-text text-transparent">
-              Every answer pays the creators.
+              Every paid answer pays a creator.
             </span>
           </h1>
 
-          {/* Conversational Subtitle */}
           <p className="mt-3.5 max-w-lg text-center text-[15px] leading-relaxed text-slate-400 sm:text-[16px]">
             Thousands of public creators, posts and tracks, available a page at a time over x402, and every settlement
             is split with the creators behind it.
@@ -176,7 +173,6 @@ export default function AgentCheckoutPage() {
               </button>
             </form>
 
-            {/* Minimal Suggestion Chips (Text-Only, Human, Clean) */}
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               {suggestions.map((item) => (
                 <button
@@ -199,7 +195,6 @@ export default function AgentCheckoutPage() {
                 </button>
               ))}
             </div>
-            {/* Reassuring Protocol Note */}
             <p className="mt-6 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[11.5px] font-light text-slate-400">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
               <span>Autonomous x402 micropayments on Celo</span>
@@ -209,9 +204,7 @@ export default function AgentCheckoutPage() {
           </div>
         </main>
       ) : (
-        /* BEGIN: Conversational Thread (Claude/ChatGPT Style) */
         <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col space-y-8 px-4 py-8 sm:px-6 sm:py-12">
-          {/* Subtle Session Timestamp */}
           <div className="flex items-center justify-center">
             <span className="rounded-full border border-white/[0.05] bg-white/[0.02] px-3 py-1 text-[11px] font-medium text-slate-400">
               Today
@@ -228,7 +221,6 @@ export default function AgentCheckoutPage() {
                 </li>
               ) : (
                 <li key={turn.id} className="turn-in flex items-start gap-3.5 sm:gap-4.5">
-                  {/* Warm Assistant Avatar with Real Streamlivr Icon */}
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-cyan-400/30 shadow-[0_2px_10px_rgba(0,218,248,0.15)]">
                     <Image
                       src="/streamlivr-icon.png"

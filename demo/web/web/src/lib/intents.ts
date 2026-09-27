@@ -257,10 +257,7 @@ const ENDPOINTS: Record<'ping' | DatasetId, EndpointSpec> = {
     title: 'Payment gate',
     noun: 'checks',
     shape: 'ping',
-    intro: [
-      'Checking the payment gate. It only answers once a payment settles.',
-      'Calling the liveness route. This one is a pure settlement check.',
-    ],
+    intro: ['Checking the payment gate. It answers only after a payment settles.'],
   },
   listings: {
     id: 'listings',
@@ -268,10 +265,7 @@ const ENDPOINTS: Record<'ping' | DatasetId, EndpointSpec> = {
     title: 'Creator listings',
     noun: 'creators',
     shape: 'creators',
-    intro: [
-      'Fetching creator listings. Every public account is in here.',
-      'Listing public creators. One page, and the response names how many matched.',
-    ],
+    intro: ['Fetching public creator listings, one page at a time.'],
   },
   posts: {
     id: 'posts',
@@ -279,10 +273,7 @@ const ENDPOINTS: Record<'ping' | DatasetId, EndpointSpec> = {
     title: 'Public posts',
     noun: 'posts',
     shape: 'posts',
-    intro: [
-      'Fetching public posts, newest first: titles, captions, tags and engagement.',
-      'Listing public posts. Every row is a post that is published and public.',
-    ],
+    intro: ['Fetching public posts, newest first.'],
   },
   catalog: {
     id: 'catalog',
@@ -290,10 +281,7 @@ const ENDPOINTS: Record<'ping' | DatasetId, EndpointSpec> = {
     title: 'Music catalog',
     noun: 'tracks',
     shape: 'tracks',
-    intro: [
-      'Pulling the music catalog: cover art, ISRCs, and the creators who own each recording.',
-      'Fetching the catalog. Tracks come back with their artwork and the creators behind them.',
-    ],
+    intro: ['Fetching the music catalog, with the artist who owns each recording.'],
   },
 };
 
@@ -499,10 +487,7 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
     text:
       call.lead ??
       (q
-        ? pick([
-            `Searching ${spec.noun} for “${q}”. One cent per creator credited, so a wider page costs more and a page that finds nothing is free.`,
-            `Looking for “${q}” across ${spec.noun}. The seller searches everything, prices the page it returns, and states the total in the 402.`,
-          ])
+        ? `Searching ${spec.noun} for “${q}”.`
         : pick(spec.intro)),
   });
 
@@ -525,14 +510,9 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
   if (probe.status !== 402) {
     emit({
       kind: 'text',
-      text: pick([
-        `That came back ${probe.status} instead of 402. No invoice returned, so nothing to pay.`,
-        `No payment required here (HTTP ${probe.status}). Either the gate is off or this route is free.`,
-      ]),
+      text: `Nothing to pay: this route answered ${probe.status} instead of asking for a payment.`,
     });
     emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: probe.body, endpoint: path });
-    const summary = pageSummary(spec, q, pageOf(probe));
-    if (summary) emit({ kind: 'text', text: `${summary} This deployment has the payment gate switched off.` });
     // An unpaid 200 still names creators, and the follow-up chips should offer
     // their profiles the same way a settled response does.
     const known = extractCreators(probe);
@@ -551,18 +531,11 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
     const billed = creatorsBilled(probe.terms.amount);
     emit({
       kind: 'text',
-      text: pick([
-        `The seller wants ${formatUsd(probe.terms.amount)} in ${assetName} on ${
-          NETWORKS[ctx.network].label
-        } for ${plural(billed, 'creator', 'creators')}, one cent each, paid to ${shortAddress(
-          probe.terms.payTo,
-        )}. Nothing has been signed yet.`,
-        `Price: ${formatUsd(probe.terms.amount)} in ${assetName}, which is ${plural(
-          billed,
-          'creator',
-          'creators',
-        )} at one cent each. That is the whole negotiation, and it arrived with the 402.`,
-      ]),
+      text: `The seller wants ${formatUsd(probe.terms.amount)} in ${assetName} on ${
+        NETWORKS[ctx.network].label
+      }, which is ${plural(billed, 'creator', 'creators')} at one cent each, paid to ${shortAddress(
+        probe.terms.payTo,
+      )}. Nothing has been signed yet.`,
     });
   } else {
     emit({
@@ -575,10 +548,7 @@ async function buy(ctx: RunContext, emit: (block: Block) => void, call: PaidCall
 
   emit({
     kind: 'text',
-    text: pick([
-      `Paying it. I sign a ${assetName} authorization with the demo wallet, and the facilitator moves the money.`,
-      `Sending the payment. The signature is off-chain, so the buyer never needs gas.`,
-    ]),
+    text: `Signing a ${assetName} authorization with the demo wallet. The facilitator pays the gas and moves the money.`,
   });
 
   const stopPayProgress = stagedProgress(emit, [
@@ -640,34 +610,9 @@ function creditedCount(trace: RequestTrace, shape: PayloadShape): number {
   return ids.size;
 }
 
-/**
- * "Showing 50 of 2,431 and 2,381 behind the cursor." The dataset holds thousands
- * of rows, so a page that quietly showed fifty of them would read as "that is
- * all there is". The cursor is named because it is what the next cent buys.
- *
- * A page that is the whole result says nothing here. The caller has just said
- * how many rows came back, and repeating the count in a second sentence is the
- * kind of line that makes a chat read as a template.
- */
-function pageSummary(spec: EndpointSpec, q: string | null, page: PageMeta | undefined): string | null {
-  if (!page || typeof page.total !== 'number' || page.total === 0) return null;
-  const returned = page.returned ?? 0;
-  const total = page.total;
-  const remaining = Math.max(total - returned, 0);
-  if (!page.hasMore || remaining === 0) return null;
-  // `spec.noun` is plural ("creators"), so the singular form drops the s. A
-  // page of one is common on a narrow search, and "1 creators" reads as a bug.
-  const scope = q ? ` ${spec.noun} matching “${q}”` : ` ${spec.noun}`;
-  return pick([
-    `That is ${formatCount(returned)} of ${formatCount(total)}${scope}. ${formatCount(remaining)} more are behind the cursor, one cent each.`,
-    `Page one: ${formatCount(returned)} of ${formatCount(total)}${scope}. The next-page chip carries the cursor, and that page is priced the same way, one cent per creator.`,
-  ]);
-}
-
 /** Shared tail for every paid call: receipt, payload, commentary. */
 function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, trace: RequestTrace): MoveOutcome {
   const { spec } = call;
-  const q = call.q ?? queryOf(trace);
 
   /**
    * The seller does not settle an empty page, so there is no receipt and no
@@ -676,15 +621,12 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
   if (trace.status < 400 && !trace.receipt && trace.noChargeReason) {
     emit({
       kind: 'text',
-      text: pick([
-        'That page came back empty, so nothing was charged and the cent stayed in the wallet.',
-        'No rows for that query. The seller did not settle, so this one was free.',
-      ]),
+      text: 'That page came back empty, so nothing was charged and the cent stayed in the wallet.',
     });
     emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: trace.body, endpoint: call.path });
     emit({
       kind: 'text',
-      text: `It would have cost ${formatUsd(trace.terms?.amount ?? '0')} if there had been rows. Try a word that appears in a name, a title or a tag.`,
+      text: `It would have cost ${formatUsd(trace.terms?.amount ?? '0')} with rows on it. Try a word that appears in a name, a title or a tag.`,
     });
     return { lastTrace: trace, next: nextMoves(ctx, trace) };
   }
@@ -714,57 +656,20 @@ function finish(ctx: RunContext, emit: (block: Block) => void, call: PaidCall, t
 
   emit({ kind: 'payload', title: spec.title, shape: spec.shape, data: trace.body, endpoint: call.path });
 
-  const rows = countRows(trace);
-  const credits = creditedCount(trace, spec.shape);
-
-  if (spec.shape === 'creators') {
+  /**
+   * Nothing is said about the rows here. The card carries the count, the cursor
+   * and the credit on every row, and the receipt carries the money. A sentence
+   * that repeats either of them is the line that makes a chat read as a
+   * template, and a page that found nothing was already explained above.
+   *
+   * The liveness route has no card, so it is the one that still needs a line.
+   */
+  if (spec.shape === 'ping') {
     emit({
       kind: 'text',
-      text: rows
-        ? pick([
-            `${plural(rows, 'creator', 'creators')} on this page, billed one cent each.`,
-            `${plural(rows, 'public account', 'public accounts')} returned. Each one is billed a whole cent and keeps 60 percent of it; the platform keeps the rest.`,
-          ])
-        : pick([
-            'No public creator matches that query. Every public account is in the dataset, so the query is the only filter.',
-            'Empty page. The search is tokenised, so a partial name still finds its row, and this one found nothing.',
-          ]),
-    });
-  } else if (spec.shape === 'posts') {
-    emit({
-      kind: 'text',
-      text: rows
-        ? pick([
-            `${plural(rows, 'post', 'posts')} on this page, credited across ${plural(credits, 'creator', 'creators')} at one cent each.`,
-            `${plural(rows, 'public post', 'public posts')} returned, newest first. Only original posts are credited to their author; a post that borrows someone else's sound credits the artist who owns it, and audio nobody on Streamlivr owns is retained by the platform.`,
-          ])
-        : 'No public post matches that query. Titles, captions and tags are all searched.',
-    });
-  } else if (spec.shape === 'tracks') {
-    emit({
-      kind: 'text',
-      text: rows
-        ? pick([
-            `${plural(rows, 'track', 'tracks')}, one cent per credited artist, not one cent for the page.`,
-            `${plural(rows, 'track', 'tracks')} returned with cover art. A track credits the artist who owns it when that artist is on Streamlivr; a commercial recording nobody here owns is retained by the platform instead.`,
-          ])
-        : pick([
-            'The catalog came back empty for that query. Titles, creators and ISRCs are searched.',
-            'No track matches. A search for a song title still works token by token, so try the words you know.',
-          ]),
-    });
-  } else {
-    emit({
-      kind: 'text',
-      text: pick([
-        'Settled. The route answers 200 only after the transfer lands, so a 200 here is proof the money moved.',
-        'Done. That 200 came back after settlement, not before it.',
-      ]),
+      text: 'The route answers 200 only after the transfer lands, so this is settlement working end to end.',
     });
   }
-
-  const summary = pageSummary(spec, q, pageOf(trace));
-  if (summary) emit({ kind: 'text', text: summary });
 
   const known = extractCreators(trace);
   return {
@@ -780,10 +685,7 @@ async function buyProfile(ctx: RunContext, emit: (block: Block) => void, creator
 
   emit({
     kind: 'text',
-    text: pick([
-      `Buying ${label}'s profile. One cent, same as every other route, and the whole cent credits one creator instead of a pool.`,
-      `Fetching ${label}. Single profile, same price and same payment flow as everything else.`,
-    ]),
+    text: `Buying ${label}'s profile. One cent, and it credits that one creator.`,
   });
 
   const stopProbe = stagedProgress(emit, [{ atMs: 0, label: `Requesting ${label}'s profile` }]);
@@ -894,10 +796,7 @@ async function afterProfile(
 
   emit({
     kind: 'text',
-    text: pick([
-      `Attribution for this route landed on ${label} alone, so the whole creator share sits under their name.`,
-      'The ledger card is a free read of the same database the payouts run from.',
-    ]),
+    text: `This route credited ${label} alone, so the whole creator share sits under their name.`,
   });
 
   return outcome;
@@ -905,8 +804,8 @@ async function afterProfile(
 
 // ── Move catalogue ──────────────────────────────────────────────────────────
 
-/** What one profile costs. Half a cent, so single-creator attribution is cheap. */
-const PROFILE_PRICE = '5000';
+/** What one profile costs. One cent, the same floor as every other request. */
+const PROFILE_PRICE = '10000';
 
 const movePing: Move = {
   id: 'ping',
@@ -919,7 +818,7 @@ const movePing: Move = {
 const moveListings: Move = {
   id: 'listings',
   label: 'Creator listings',
-  hint: 'One cent. Every public account, fifty a page.',
+  hint: 'One cent per creator, ten a page by default.',
   group: 'discover',
   run: (ctx, emit) => buy(ctx, emit, { spec: ENDPOINTS.listings, path: ENDPOINTS.listings.path }),
 };
@@ -927,7 +826,7 @@ const moveListings: Move = {
 const movePosts: Move = {
   id: 'posts',
   label: 'Public posts',
-  hint: 'One cent. Newest posts, fifty a page.',
+  hint: 'One cent per creator credited, ten posts a page.',
   group: 'discover',
   run: (ctx, emit) => buy(ctx, emit, { spec: ENDPOINTS.posts, path: ENDPOINTS.posts.path }),
 };
@@ -952,10 +851,7 @@ const moveInventory: Move = {
   async run(ctx, emit) {
     emit({
       kind: 'text',
-      text: pick([
-        'Reading the inventory. This one is free, because nobody should pay to find out whether there is anything worth buying.',
-        'Counting what is behind the paywall. The inventory route is open, so it costs nothing to look.',
-      ]),
+      text: 'Reading the free inventory: how much is there, and what is worth searching for.',
     });
     const stopProgress = stagedProgress(emit, [{ atMs: 0, label: 'Counting public creators, posts and tracks' }]);
     const probe = await probeResource('/api/v1/agent/stats');
@@ -979,7 +875,7 @@ const moveInventory: Move = {
     });
     emit({
       kind: 'text',
-      text: 'Those are the totals behind the three paid data routes. A page still costs the same cent whether the search matches fifty rows or the whole dataset.',
+      text: 'Those are the totals behind the three paid data routes. A page costs one cent per creator it credits, and a page that matches nothing costs nothing.',
     });
     return { lastTrace: probe, next: nextMoves(ctx, probe) };
   },
@@ -1006,10 +902,7 @@ const moveQuote: Move = {
   async run(ctx, emit) {
     emit({
       kind: 'text',
-      text: pick([
-        'Reading every price. Looking at a 402 is free, so nothing is signed and nothing is charged.',
-        'Price list, read live. These are the invoices each route returns to an unpaid request.',
-      ]),
+      text: 'Reading every price. Looking at a 402 is free, so nothing is signed and nothing is charged.',
     });
 
     const targets = [...QUOTE_ROUTES];
@@ -1080,22 +973,19 @@ const moveQuote: Move = {
 
 const moveWallet: Move = {
   id: 'wallet',
-  label: 'Burner wallet',
+  label: 'Demo wallet',
   hint: 'Address, balances, session spend.',
   group: 'wallet',
   async run(ctx, emit) {
     emit({
       kind: 'text',
-      text: pick([
-        'Fetching the burner balances straight from Celo RPC.',
-        'Reading the wallet this demo signs with.',
-      ]),
+      text: 'Reading the demo wallet balances from Celo RPC.',
     });
     const profile = NETWORKS[ctx.network];
     if (!/^0x[0-9a-fA-F]{64}$/.test(ctx.burnerKey)) {
       emit({
         kind: 'error',
-        text: 'No burner key is configured for this build.',
+        text: 'No buyer key is configured for this build.',
         hint: 'Set NEXT_PUBLIC_BURNER_PRIVATE_KEY and rebuild. The chat can still read quotes without it.',
       });
       return {};
@@ -1108,7 +998,7 @@ const moveWallet: Move = {
     ]);
     emit({
       kind: 'payload',
-      title: 'Burner wallet',
+      title: 'Demo wallet',
       shape: 'generic',
       endpoint: 'wallet',
       data: {
@@ -1123,10 +1013,7 @@ const moveWallet: Move = {
     });
     emit({
       kind: 'text',
-      text: pick([
-        'The buyer never needs CELO: the facilitator covers gas on Celo. A zero native balance is expected here.',
-        'Native CELO stays empty on purpose. Stablecoin in, signature out, facilitator pays the fee.',
-      ]),
+      text: 'The buyer never needs CELO: the facilitator covers gas on Celo, so a zero native balance is expected here.',
     });
     return {};
   },
@@ -1145,10 +1032,7 @@ const moveSwitch: Move = {
     ctx.setNetwork(next);
     emit({
       kind: 'text',
-      text: pick([
-        `Switched to ${NETWORKS[next].label}. The invoice decides the chain, so nothing else needs reconfiguring.`,
-        `Now quoting against ${NETWORKS[next].label}. The burner key is the same; the settlement asset is not.`,
-      ]),
+      text: `Switched to ${NETWORKS[next].label}. The invoice decides the chain, so nothing else needs reconfiguring.`,
     });
     return {};
   },
@@ -1164,14 +1048,8 @@ const moveSpend: Move = {
     emit({
       kind: 'text',
       text: spent
-        ? pick([
-            `This tab has settled ${formatUsd(String(spent))} so far. The burner holds the rest.`,
-            `${formatUsd(String(spent))} spent in this session, across every page you have paid for.`,
-          ])
-        : pick([
-            'Nothing yet. Every quote you have looked at so far was free.',
-            'This session has not settled anything. Quotes do not cost anything.',
-          ]),
+        ? `This tab has settled ${formatUsd(String(spent))} so far, across every page you have paid for.`
+        : 'Nothing yet. Quotes are free, so only a settled payment moves this number.',
     });
     emit({
       kind: 'raw',
@@ -1218,10 +1096,7 @@ const moveExplain: Move = {
   async run(_ctx, emit) {
     emit({
       kind: 'text',
-      text: pick([
-        'Here is the whole loop, in the order it happens.',
-        'Six steps from an unpaid request to settled money.',
-      ]),
+      text: 'Six steps from an unpaid request to settled money.',
     });
     emit({
       kind: 'payload',
@@ -1295,11 +1170,7 @@ const moveEndpoints: Move = {
     });
     emit({
       kind: 'text',
-      text: pick([
-        'The dataset is African and global creator, brand, music and content metadata: public profiles, public posts and catalogued recordings, with each row labelled by who it credits.',
-        'What is for sale is what the app already shows anyone: public profiles, public content and music metadata. Nothing private is reachable from a paid route.',
-        'Only original work credits a creator. A post that borrows another creator\u2019s sound credits the artist who owns that sound, and a commercial recording nobody on Streamlivr owns is retained by the platform.',
-      ]),
+      text: "The dataset is African and global creator, brand, music and content metadata: public profiles, public posts and catalogued recordings, with each row labelled by who it credits. Only original work pays a creator: a post that borrows another creator's sound pays the artist who owns that sound, and a commercial recording nobody on Streamlivr owns is retained by the platform.",
     });
     return {};
   },
@@ -1417,8 +1288,8 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
       label: `Next ${rows} ${spec.noun}`,
       hint:
         remaining > 0
-          ? `${formatCount(remaining)} more behind the cursor. One cent, same as this page.`
-          : 'The next page behind the cursor. One cent.',
+          ? `${formatCount(remaining)} more behind the cursor. Priced the same way: one cent per creator that page credits.`
+          : 'The next page behind the cursor, priced at one cent per creator it credits.',
       group: 'discover',
       run: (innerCtx, emit) =>
         buy(innerCtx, emit, {
@@ -1438,7 +1309,7 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
           dataset,
           q,
           `Search ${other.noun} for “${q}”`,
-          `The same query against ${other.noun}. One cent, one page.`,
+          `The same query against ${other.noun}. One cent per creator credited.`,
         ),
       );
     }

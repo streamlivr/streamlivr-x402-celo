@@ -130,8 +130,8 @@ export function RawInspector({ trace, label }: { trace: RequestTrace; label: str
 
           {active.id === 'invoice' && (
             <p className="mt-2 text-[12px] leading-relaxed text-text-muted">
-              This is the whole negotiation. The seller names the price, the asset, the address that gets paid, and the
-              EIP-712 domain the signature must use. A buyer needs no prior knowledge of this API.
+              The seller names the price, the asset, the address that gets paid, and the EIP-712 domain the signature
+              must use.
             </p>
           )}
           {active.id === 'signature' && (
