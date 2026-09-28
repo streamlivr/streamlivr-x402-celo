@@ -48,7 +48,7 @@ function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string
   const returned = page.returned ?? 0;
   return (
     <p className="px-1 text-[12px] text-slate-500">
-      <span className="tabular text-slate-400">{formatCount(returned)}</span> {noun} on this page ·{' '}
+      <span className="tabular text-slate-400">{formatCount(returned)}</span> {returned === 1 ? noun.replace(/s$/, '') : noun} on this page ·{' '}
       <span className="tabular text-slate-400">{formatCount(page.total)}</span> total
       {q ? <> matching “{q}”</> : null}
       {page.hasMore ? '. Next page available.' : '. No more pages.'}

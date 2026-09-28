@@ -62,9 +62,9 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
    */
   const credited =
     block.credited > 1
-      ? `${block.credited} creators credited in the ledger`
+      ? `${block.credited} creators`
       : block.credited === 1
-        ? '1 creator credited in the ledger'
+        ? '1 creator'
         : '';
 
   return (
@@ -93,7 +93,7 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
       </div>
       {credited && (
         <p className="px-1 text-[11.5px] leading-relaxed text-slate-500">
-          One transfer to the platform wallet. 60% is shared across {credited}. Creator payouts are sent later in batches.
+          One transfer to the platform wallet. 60% is credited to {credited} in the ledger. Payouts are sent later in batches.
         </p>
       )}
     </div>
