@@ -86,4 +86,16 @@ describe('public data access policy', () => {
     expect(asCountryCode('Lag os')).toBeNull();
     expect(asCountryCode('N1')).toBeNull();
   });
+
+  it('keeps the country after a long question and joins country names before dropping filler', () => {
+    expect(searchReadings('Can you please show me the creators in Nigeria?', CREATOR_QUERY_WORDS)).toEqual([
+      { tokens: ['nigeria'], match: 'all' },
+    ]);
+    expect(searchReadings('Show me creators in the United States of America', CREATOR_QUERY_WORDS)).toEqual([
+      { tokens: ['united states of america'], match: 'all' },
+    ]);
+    expect(searchReadings('creators in South Africa', CREATOR_QUERY_WORDS)).toEqual([
+      { tokens: ['south africa'], match: 'all' },
+    ]);
+  });
 });

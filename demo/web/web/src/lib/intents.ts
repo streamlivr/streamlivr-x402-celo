@@ -1090,11 +1090,11 @@ const moveExplain: Move = {
           'The seller answers 402 with the price, the asset, the payee, and the EIP-712 domain.',
           'The agent signs a TransferWithAuthorization off-chain. No approval transaction, no gas.',
           'The agent repeats the request with a payment-signature header.',
-          'The Celo facilitator verifies, then settles through the token contract. The seller never custodies funds.',
+          'The Celo facilitator verifies the authorization and transfers USDC to the platform wallet, paying the gas.',
           'The seller returns 200 with the data and a payment-response header carrying the transaction hash.',
         ],
-        split: 'Each settled payment is split 60% to the creators whose data was served and 40% to the platform.',
-        note: 'Payment is per creator credited, not per page and not per subscription. A page that credits ten creators costs ten cents, and a page that matches nothing costs nothing.',
+        split: 'For paid data, 60% is credited to creators in the ledger and 40% to the platform. Creator payouts are sent later in batches.',
+        note: 'A page costs one cent per creator credited. Ten creators cost ten cents. Empty pages are free.',
       },
     });
     return {};

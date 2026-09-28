@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Check, Copy, Plus } from 'lucide-react';
@@ -54,6 +54,7 @@ export function PageHeader({
   const isChat = !isLedger;
   const [copied, setCopied] = useState(false);
   const [balanceAtomic, setBalanceAtomic] = useState<string | null>(null);
+  const balanceRead = useRef(0);
 
   // The address is derived from the key the demo actually signs with, so the
   // pill can never point at a different wallet than the one spending.
@@ -64,9 +65,10 @@ export function PageHeader({
 
   const readBalance = useCallback(async () => {
     if (!burnerAddress) return;
+    const read = ++balanceRead.current;
     try {
       const balance = await fetchAssetBalance(networkKey, burnerAddress, NETWORKS[networkKey].usdc);
-      setBalanceAtomic(balance);
+      if (read === balanceRead.current) setBalanceAtomic(balance);
     } catch {
       // Keep the last confirmed figure. The pill shows a placeholder until the
       // first read lands, and never invents a number.
@@ -75,6 +77,15 @@ export function PageHeader({
 
   useEffect(() => {
     void readBalance();
+    // Some RPC nodes briefly lag the settlement receipt. Refresh again after
+    // they catch up, rather than leaving the old balance until the next poll.
+    const timers = refreshKey > 0
+      ? [2000, 5000].map((delay) => setTimeout(() => void readBalance(), delay))
+      : [];
+    return () => {
+      timers.forEach(clearTimeout);
+      balanceRead.current += 1;
+    };
   }, [readBalance, refreshKey]);
 
   // A slow poll keeps the pill honest when a payment settles in another tab.

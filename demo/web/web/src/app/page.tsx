@@ -139,7 +139,7 @@ export default function AgentCheckoutPage() {
           <h1 className="text-center font-display text-3xl font-bold tracking-tight text-white sm:text-5xl sm:leading-[1.18]">
             Search creators, posts and tracks.{' '}
             <span className="block bg-gradient-to-r from-white via-slate-100 to-[#00daf8] bg-clip-text text-transparent">
-              Every paid answer pays a creator.
+              Paid searches credit the creators behind the results.
             </span>
           </h1>
 
@@ -158,7 +158,7 @@ export default function AgentCheckoutPage() {
                 type="text"
                 value={inputQuery}
                 onChange={(e) => setInputQuery(e.target.value)}
-                placeholder="Ask anything or search protected catalog..."
+                placeholder="Search creators, posts and tracks"
                 disabled={busy}
                 className="w-full border-none bg-transparent px-3 py-2.5 text-sm leading-relaxed text-white placeholder-slate-500 focus:outline-none focus:ring-0"
               />
@@ -189,7 +189,7 @@ export default function AgentCheckoutPage() {
                       setInputQuery('');
                     }
                   }}
-                  className="max-w-full truncate rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-all hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-95 disabled:opacity-40"
+                  className="max-w-full break-words rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-colors hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-[0.96] disabled:opacity-40"
                 >
                   {item.label}
                 </button>
@@ -197,7 +197,7 @@ export default function AgentCheckoutPage() {
             </div>
             <p className="mt-6 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[11.5px] font-light text-slate-400">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              <span>Autonomous x402 micropayments on Celo</span>
+              <span>Live x402 demo on Celo</span>
               <span className="text-slate-600">•</span>
               <span>the buyer signs, the facilitator pays the gas</span>
             </p>
@@ -215,7 +215,7 @@ export default function AgentCheckoutPage() {
             {turns.map((turn, turnIndex) =>
               turn.role === 'user' ? (
                 <li key={turn.id} className="turn-in flex justify-end items-end gap-2.5">
-                  <div className="max-w-md rounded-3xl rounded-br-md border border-white/[0.09] bg-gradient-to-b from-[#1b202c] to-[#151923] px-5 py-3.5 text-[15px] leading-relaxed text-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.25)] sm:max-w-lg">
+                  <div className="max-w-full break-words rounded-3xl rounded-br-md border border-white/[0.09] bg-gradient-to-b from-[#1b202c] to-[#151923] px-5 py-3.5 text-[15px] leading-relaxed text-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.25)] sm:max-w-lg">
                     {turn.label}
                   </div>
                 </li>
@@ -232,7 +232,7 @@ export default function AgentCheckoutPage() {
                   </div>
 
                   {/* Assistant Content */}
-                  <div className="max-w-2xl flex-1 space-y-3.5">
+                  <div className="min-w-0 max-w-2xl flex-1 space-y-3.5 break-words">
                     {turn.blocks.length === 0 && <ThinkingBubble label="Sending the request..." />}
                     {turn.blocks.slice(0, turn.revealed).map((block, index) => (
                       <div key={index} className="turn-in">

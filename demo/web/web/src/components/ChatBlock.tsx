@@ -26,7 +26,7 @@ function InvoicePill({ block }: { block: Extract<Block, { kind: 'invoice' }> }) 
 
   return (
     <div className="flex items-center gap-2 pt-0.5">
-      <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
+      <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
         <span
           className={`h-1.5 w-1.5 rounded-full ${payable ? 'pulse-dot bg-cyan-400' : 'bg-slate-500'}`}
         />
@@ -60,17 +60,16 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
    * minimum, so the pill must not read as if fifty transfers left the wallet at
    * once or as if a page-wide cent was shared between fifty people.
    */
-  const perCreator = 'one cent each';
   const credited =
     block.credited > 1
-      ? `${block.credited} creators credited, ${perCreator}`
+      ? `${block.credited} creators credited in the ledger`
       : block.credited === 1
-        ? `1 creator credited, ${perCreator}`
+        ? '1 creator credited in the ledger'
         : '';
 
   return (
     <div className="flex flex-col items-start gap-1 pt-1">
-      <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
+      <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-3 py-1.5 text-xs text-slate-300 shadow-sm">
         <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
         <span>
           Settled{' '}
@@ -94,8 +93,7 @@ function ReceiptPill({ block }: { block: Extract<Block, { kind: 'receipt' }> }) 
       </div>
       {credited && (
         <p className="px-1 text-[11.5px] leading-relaxed text-slate-500">
-          One on-chain transfer to the platform wallet, {credited}. The split and the creator balances live in the
-          ledger beside it, and payouts leave in batches once a balance clears the payout minimum.
+          One transfer to the platform wallet. 60% is shared across {credited}. Creator payouts are sent later in batches.
         </p>
       )}
     </div>

@@ -1,6 +1,7 @@
 'use client';
 
-import { x402Client, wrapFetchWithPayment, decodePaymentResponseHeader } from '@x402/fetch';
+import { x402Client, x402HTTPClient, decodePaymentResponseHeader } from '@x402/fetch';
+import type { PaymentRequired } from '@x402/core/types';
 import { decodePaymentRequiredHeader } from '@x402/core/http';
 import { ExactEvmScheme } from '@x402/evm/exact/client';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -282,7 +283,7 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     let terms = options.terms ?? null;
 
     // No quote supplied: ask for one. This is the 402 round trip.
-    if (!terms) {
+    if (!terms || !challenge) {
       const probe = await fetchReadWithRetry(
         url,
         { headers: { accept: 'application/json', ...API_REQUEST_HEADERS } },
@@ -333,6 +334,9 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     }
 
     const requested = Number(terms.amount);
+    if (!/^\d+$/.test(terms.amount) || !Number.isSafeInteger(requested) || requested <= 0) {
+      return blankTrace(options.path, started, 'The invoice amount is invalid. Nothing was signed.');
+    }
     if (Number.isFinite(requested) && requested > options.maxAtomicPerRequest) {
       return {
         ...blankTrace(
@@ -355,25 +359,6 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     }
 
     const account = privateKeyToAccount(options.burnerKey as `0x${string}`);
-    let signedHeaders: Record<string, string> | null = null;
-
-    // Capture the retry request so the inspector can show the authorization
-    // that was actually signed, not a reconstruction of it.
-    //
-    // The x402 client calls fetch with a Request that already carries the
-    // payment header, so the headers have to be read from the Request before
-    // init is applied. Rebuilding them from init alone silently drops
-    // payment-signature and turns a paid retry into a second unpaid request.
-    const recordingFetch: typeof fetch = async (input, init) => {
-      const source = init?.headers ?? (input instanceof Request ? input.headers : undefined);
-      const merged = new Headers(source);
-      for (const [name, value] of Object.entries(API_REQUEST_HEADERS)) merged.set(name, value);
-      const response = await fetch(input, { ...init, headers: merged });
-      if (merged.has('payment-signature') || merged.has('x-payment')) {
-        signedHeaders = Object.fromEntries(merged.entries());
-      }
-      return response;
-    };
 
     // The x402 client types the network as a CAIP-2 template literal; the
     // invoice carries it as a plain string.
@@ -393,12 +378,24 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
     const payingProfile =
       Object.values(NETWORKS).find((candidate) => candidate.caip2 === terms.network) ?? profile;
     client.register(caip2, new ExactEvmScheme(account, { rpcUrl: payingProfile.rpcUrl }));
-    const paidFetch = wrapFetchWithPayment(recordingFetch, client);
-
-    const response = await paidFetch(url, {
-      headers: { accept: 'application/json', ...API_REQUEST_HEADERS },
+    // Sign the quote already shown to the buyer. A wrapped fetch would fetch
+    // another unpaid quote first, adding a round trip and allowing the displayed
+    // invoice to differ from the one actually signed.
+    const paymentPayload = await client.createPaymentPayload({
+      ...challenge,
+      accepts: [terms],
+    } as PaymentRequired);
+    const httpClient = new x402HTTPClient(client);
+    const signedHeaders: Record<string, string> = {
+      accept: 'application/json',
+      ...API_REQUEST_HEADERS,
+      ...httpClient.encodePaymentSignatureHeader(paymentPayload),
+    };
+    const response = await fetch(url, {
+      headers: signedHeaders,
       signal: AbortSignal.timeout(PAYMENT_TIMEOUT_MS),
     });
+    await httpClient.processPaymentResult(paymentPayload, (name) => response.headers.get(name), response.status);
     const responseHeader = response.headers.get('payment-response');
     let receipt: SettlementReceipt | null = null;
     if (responseHeader) {
@@ -431,9 +428,9 @@ export async function paidRequest(options: PaidRequestOptions): Promise<RequestT
       body,
       raw: {
         challengeHeader,
-        signatureHeader: signedHeaders?.['payment-signature'] ?? signedHeaders?.['x-payment'] ?? null,
+        signatureHeader: new Headers(signedHeaders).get('payment-signature') ?? new Headers(signedHeaders).get('x-payment'),
         responseHeader,
-        requestHeaders: signedHeaders ?? {},
+        requestHeaders: signedHeaders,
         responseHeaders: headerRecord(response.headers),
       },
       error:

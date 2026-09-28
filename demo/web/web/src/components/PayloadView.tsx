@@ -655,7 +655,7 @@ function QuotesCard({ data }: { data: Record<string, unknown> }) {
 function RoutesCard({ routes, note }: { routes: { path: string; price: string; returns: string }[]; note?: string }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#10131a]/85 shadow-sm backdrop-blur-md">
-      <table className="w-full text-left">
+      <table className="w-full table-fixed text-left">
         <thead>
           <tr className="border-b border-white/[0.06] text-[10.5px] uppercase tracking-wide text-slate-500">
             <th className="px-4 py-2.5 font-medium">Route</th>
@@ -666,7 +666,7 @@ function RoutesCard({ routes, note }: { routes: { path: string; price: string; r
         <tbody className="divide-y divide-white/[0.05]">
           {routes.map((route) => (
             <tr key={route.path}>
-              <td className="px-4 py-2.5 font-mono text-[12px] text-slate-200">{route.path}</td>
+              <td className="break-all px-4 py-2.5 font-mono text-[12px] text-slate-200">{route.path}</td>
               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12px] text-cyan-300">
                 {route.price === 'free' ? 'free' : `$${route.price}`}
               </td>

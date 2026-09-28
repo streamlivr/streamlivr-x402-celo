@@ -182,14 +182,32 @@ export function searchReadings(
   drop: ReadonlySet<string> = FILLER_WORDS,
   maxTokens = 6,
 ): SearchReading[] {
-  const tokens = searchTokens(q, maxTokens);
+  let tokens = searchTokens(q, Number.POSITIVE_INFINITY);
+  if (drop === CREATOR_QUERY_WORDS) {
+    const joined: string[] = [];
+    for (let index = 0; index < tokens.length; index += 1) {
+      let consumed = 1;
+      for (let size = Math.min(7, tokens.length - index); size >= 2; size -= 1) {
+        const phrase = tokens.slice(index, index + size).join(' ');
+        if (asCountryCode(phrase)) {
+          joined.push(phrase);
+          consumed = size;
+          break;
+        }
+      }
+      if (consumed === 1) joined.push(tokens[index]!);
+      index += consumed - 1;
+    }
+    tokens = joined;
+  }
   if (tokens.length === 0) return [{ tokens: [], match: 'all' }];
-  const content = tokens.filter((token) => !drop.has(token));
+  const meaningful = tokens.filter((token) => !drop.has(token));
+  const content = meaningful.slice(0, maxTokens);
   // A query that is nothing but filler ("the song") still has to search for
   // something, so the words are kept rather than thrown away.
-  if (content.length === 0) return [{ tokens, match: 'all' }];
+  if (content.length === 0) return [{ tokens: tokens.slice(0, maxTokens), match: 'all' }];
   const readings: SearchReading[] = [{ tokens: content, match: 'all' }];
-  const wasSentence = content.length !== tokens.length;
+  const wasSentence = meaningful.length !== tokens.length;
   if (wasSentence && content.length > 1) readings.push({ tokens: content, match: 'any' });
   return readings;
 }

@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Streamlivr x402: Agent Checkout Demo',
   description:
-    'Talk to an agent that pays per request on Celo, and watch Streamlivr settle funds directly to creators.',
+    'A live x402 demo on Celo. Pay for public data, verify the platform transfer on-chain, and see creator shares in the payout ledger.',
   icons: { icon: '/streamlivr-icon.png' },
 };
 

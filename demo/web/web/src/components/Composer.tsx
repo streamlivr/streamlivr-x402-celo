@@ -52,7 +52,7 @@ export function Composer({
         {/* Four chips, not three: after a search the useful next steps are the
             next page, a profile, and the same query in another dataset. */}
         {options.length > 0 && (
-          <div className="no-scrollbar flex items-center justify-center gap-2 overflow-x-auto py-0.5">
+          <div className="flex flex-wrap items-center justify-center gap-2 py-0.5">
             {options.slice(0, 4).map((move) => (
               <button
                 key={move.id}
@@ -60,7 +60,7 @@ export function Composer({
                 disabled={busy}
                 title={move.hint}
                 onClick={() => onPick(move)}
-                className="max-w-full truncate rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-all hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-95 disabled:opacity-40"
+                className="max-w-full break-words rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm transition-colors hover:border-white/[0.15] hover:bg-white/[0.07] hover:text-white active:scale-[0.96] disabled:opacity-40"
               >
                 {move.label}
               </button>
@@ -97,7 +97,7 @@ export function Composer({
 
         <p className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[11px] font-light text-slate-400">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          <span>Autonomous x402 micropayments on Celo</span>
+          <span>Live x402 demo on Celo</span>
           <span className="text-slate-600">•</span>
           <span>the buyer signs, the facilitator pays the gas</span>
         </p>
