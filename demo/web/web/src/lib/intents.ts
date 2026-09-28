@@ -264,7 +264,7 @@ const ENDPOINTS: Record<'ping' | DatasetId, EndpointSpec> = {
     title: 'Music catalog',
     noun: 'tracks',
     shape: 'tracks',
-    intro: ['Fetching the music catalog, with the artist who owns each recording.'],
+    intro: ['Fetching tracks and recording details.'],
   },
 };
 
