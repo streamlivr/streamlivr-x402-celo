@@ -5,7 +5,8 @@ repository is the payment layer that sells that public data to software, one HTT
 over x402 on Celo. Money that arrives gets attributed to the creators whose data was served, and
 payouts leave from the Celo wallet the settlements landed in.
 
-Five paid routes, one cent each, settled in USDC through the hosted Celo facilitator. The
+Five paid routes: one cent per credited creator on data pages, with a one-cent minimum; ping and
+single-profile requests cost one cent. Payments settle in USDC through the hosted Celo facilitator. The
 buyer signs an EIP-3009 authorization off-chain, retries the request, and the facilitator pays the
 gas. A buyer never needs CELO.
 
