@@ -95,6 +95,8 @@ export interface PaidRouteQueryParam {
   name: string;
   description: string;
   example: string;
+  type?: 'string' | 'integer' | 'boolean';
+  values?: string[];
 }
 
 export interface PaidRoute {
@@ -132,6 +134,7 @@ export const PAGE_QUERY_PARAMS: PaidRouteQueryParam[] = [
   },
   {
     name: 'limit',
+    type: 'integer',
     description: `Rows to return, 1-${MAX_PAGE_LIMIT}, default ${DEFAULT_PAGE_LIMIT}. This is the cost control: the invoice is one cent per creator the page credits, so a bigger page costs more.`,
     example: String(DEFAULT_PAGE_LIMIT),
   },
@@ -140,6 +143,18 @@ export const PAGE_QUERY_PARAMS: PaidRouteQueryParam[] = [
     description: 'nextCursor from the previous page. Omit for the first page.',
     example: 'eyJpZCI6ImNtbWdnYnRpazAwMDBxcnFiem9udHZzeTM4In0',
   },
+];
+
+export const CREATOR_QUERY_PARAMS: PaidRouteQueryParam[] = [
+  ...PAGE_QUERY_PARAMS,
+  { name: 'verified', type: 'boolean', description: 'Filter public creators by verified status. Omit for both.', example: 'true' },
+  { name: 'minFollowers', type: 'integer', description: 'Minimum public follower count, 0-2147483647.', example: '1000' },
+  { name: 'sort', values: ['followers', 'newest'], description: 'Follower count descending (default) or newest account first.', example: 'followers' },
+];
+
+export const POST_QUERY_PARAMS: PaidRouteQueryParam[] = [
+  ...PAGE_QUERY_PARAMS,
+  { name: 'sort', values: ['newest', 'views'], description: 'Newest first (default) or public view count descending.', example: 'views' },
 ];
 
 /**
@@ -167,10 +182,10 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       id: 'creator-listings',
       title: 'Creator and brand directory',
       description:
-        `Public creator and brand profiles from Streamlivr and the wider African and global creator economy: display name, bio, avatar, country, follower and following counts, verification and account age. Searchable by name, bio, country name or country code with ?q=, and paginated, so the response carries the total that matched and a nextCursor. Priced per creator credited and attributed to each one when the payment settles. ${PRICE_RULE.summary}`,
+        `Public creator and brand profiles: name, bio, avatar, country, follower counts, verification and account age. Searchable by name, bio, hashtag and country with ?q=. Combine with ?limit=, ?verified=, ?minFollowers= and ?sort=followers|newest. The response includes the total and nextCursor. Priced per creator credited. ${PRICE_RULE.summary}`,
       tags: ['x402', 'celo', 'creators', 'brands', 'africa', 'global', 'discovery', 'search'],
       priceAtomic: LISTINGS_PRICE_ATOMIC,
-      queryParams: PAGE_QUERY_PARAMS,
+      queryParams: CREATOR_QUERY_PARAMS,
       example: {
         creators: [
           {
@@ -195,10 +210,10 @@ export function buildPaidRoutes(pingPriceAtomic: string = X402_PING_PRICE_ATOMIC
       id: 'public-posts',
       title: 'Public content feed',
       description:
-        `Published public content from every public account: title, caption, hashtags, media type and length, engagement counts, and thumbnail. Each row carries an "audio" label and an "attribution" note naming the creator who owns the audio on it, because a post pays whoever made its sound rather than whoever posted it: a borrowed sound credits its owner, and audio with no Streamlivr owner is retained by the platform. That is African and global creator content, brand activity and platform engagement metadata together. Searchable by caption, hashtag or creator with ?q=, and paginated. Priced per creator credited and attributed to each one when the payment settles. ${PRICE_RULE.summary}`,
+        `Published public content from every public account: title, caption, hashtags, media type and length, engagement counts, and thumbnail. Each row labels the audio owner and attribution; borrowed sound credits its owner. Searchable by title, caption, tag or the public creator's country with ?q=. Combine with ?limit= and ?sort=newest|views, and follow nextCursor for more. Priced per creator credited. ${PRICE_RULE.summary}`,
       tags: ['x402', 'celo', 'posts', 'content', 'africa', 'global', 'brands', 'engagement', 'search'],
       priceAtomic: POSTS_PRICE_ATOMIC,
-      queryParams: PAGE_QUERY_PARAMS,
+      queryParams: POST_QUERY_PARAMS,
       example: {
         posts: [
           {
@@ -297,7 +312,9 @@ export function examplePath(route: PaidRoute): string {
   const path = route.pathParam
     ? route.path.replace(`:${route.pathParam.name}`, route.pathParam.example)
     : route.path;
-  const query = (route.queryParams ?? []).map((param) => `${param.name}=${encodeURIComponent(param.example)}`).join('&');
+  const query = (route.queryParams ?? [])
+    .filter((param) => param.name === 'q' || param.name === 'limit')
+    .map((param) => `${param.name}=${encodeURIComponent(param.example)}`).join('&');
   return query ? `${path}?${query}` : path;
 }
 

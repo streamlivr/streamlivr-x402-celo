@@ -20,6 +20,23 @@ describe('paid route pagination', () => {
     expect(result.ok === false && result.error).toMatch(/whole number/);
   });
 
+  it('validates public creator filters as typed values', () => {
+    expect(readPageQuery({ q: 'Nigeria', limit: '3', verified: 'true', minFollowers: '1000' }, options)).toEqual({
+      ok: true,
+      page: { q: 'Nigeria', limit: 3, cursor: null, verified: true, minFollowers: 1000 },
+    });
+    expect(readPageQuery({ verified: 'yes' }, options).ok).toBe(false);
+    expect(readPageQuery({ minFollowers: '-1' }, options).ok).toBe(false);
+    expect(readPageQuery({ minFollowers: '2147483648' }, options).ok).toBe(false);
+  });
+
+  it('accepts public sort names and rejects unknown rankings', () => {
+    expect(readPageQuery({ limit: '3', sort: 'views' }, options)).toEqual({
+      ok: true, page: { limit: 3, cursor: null, q: null, sort: 'views' },
+    });
+    expect(readPageQuery({ sort: 'revenue' }, options).ok).toBe(false);
+  });
+
   it('rejects a cursor this API did not issue', () => {
     const result = readPageQuery({ cursor: 'not-a-cursor' }, options);
     expect(result.ok).toBe(false);

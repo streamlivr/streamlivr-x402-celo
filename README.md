@@ -114,6 +114,18 @@ that credits three creators costs `30000`, a page that credits fifty costs `5000
 ceiling is `2000000` for the two hundred creators the routes will credit in one request. A page
 that matches nothing costs nothing.
 
+These are composable queries over the public data, not a fixed set of search phrases. Listings
+also accept `verified=true|false`, `minFollowers=<number>` and `sort=followers|newest`.
+Posts accept `sort=newest|views`. Listings default to most followed first, posts to newest first,
+and the catalog to title order. The same filters, sort and limit must be sent with `nextCursor`.
+
+For example, `top 3 creators` becomes `GET /api/v1/agent/listings?limit=3&sort=followers`.
+`top 3 verified fashion creators in Nigeria with at least 1000 followers` becomes
+`GET /api/v1/agent/listings?q=fashion+nigeria&limit=3&verified=true&minFollowers=1000&sort=followers`.
+`top 3 posts in Nigeria` uses `GET /api/v1/agent/posts?q=nigeria&limit=3&sort=views`.
+The catalog has no public popularity ranking, so the demo does not sell an alphabetical page as
+"top tracks."
+
 That is why `limit` is the cost control and why the seller prices the invoice from the page it is
 about to serve. The quote and the rows cannot disagree: `src/x402/pagePlan.ts` resolves the page
 once, the 402 is priced from it, and the 200 serves that same page.
@@ -125,9 +137,9 @@ once, the 402 is priced from it, and the 200 serves that same page.
 | A post with the publisher's own recording | the publisher |
 | A post carrying another creator's sound | the creator who owns the sound |
 | A post whose audio is a commercial recording | the artist, when that artist has a Streamlivr account |
-| Audio nobody on Streamlivr owns | nobody; the platform keeps that cent |
+| Audio nobody on Streamlivr owns | nobody; a page with no credited creator is free |
 | A catalog recording owned by a creator | the owner |
-| A catalog recording with no owner here | nobody; the platform keeps that cent |
+| A catalog recording with no owner here | nobody; a page with no credited creator is free |
 
 Every post and catalog row says which of these it is, in a `label` block and an `attribution` note
 the buyer can read without knowing the rule. Using a track is not owning it, so the creators whose
@@ -136,8 +148,8 @@ rule, in one file, with tests, and both the production API and the reference ser
 
 `q` matches the fields that route actually holds. Listings match username, display name, bio, country
 (code or name), and the hashtags on that creator's public posts, so "amapiano creators" reaches the
-people behind the tag rather than accounts with the word in a name. Posts match title, description
-and hashtag. Catalog matches title, artist and ISRC.
+people behind the tag rather than accounts with the word in a name. Posts match title, description,
+hashtag and the publishing creator's country. Catalog matches title, artist and ISRC.
 
 A sentence is read the way a person means it. Filler words and the noun for the dataset are dropped,
 so "show me creators in Nigeria" searches one country name rather than six words that have to appear

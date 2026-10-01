@@ -20,7 +20,7 @@ import { API_BASE_URL } from './config';
 export type ChatDataset = 'listings' | 'posts' | 'catalog';
 
 export type ChatAction =
-  | { kind: 'search'; dataset: ChatDataset; q: string | null }
+  | { kind: 'search'; dataset: ChatDataset; q: string | null; limit?: number; verified?: boolean; minFollowers?: number; sort?: 'followers' | 'newest' | 'views' | 'title' }
   | { kind: 'move'; moveId: string };
 
 export interface ChatPlan {
@@ -59,10 +59,25 @@ function readPlan(value: unknown): ChatPlan | null {
   const reply = typeof record.reply === 'string' && record.reply.trim() ? record.reply.trim() : null;
 
   if (kind === 'search') {
-    const dataset = (action as Record<string, unknown>).dataset;
+    const search = action as Record<string, unknown>;
+    const dataset = search.dataset;
     if (!isDataset(dataset)) return null;
-    const q = (action as Record<string, unknown>).q;
-    return { reply, action: { kind: 'search', dataset, q: typeof q === 'string' && q.trim() ? q.trim() : null } };
+    const q = search.q;
+    const limit = search.limit;
+    if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200)) return null;
+    const verified = search.verified;
+    if (verified !== undefined && (dataset !== 'listings' || typeof verified !== 'boolean')) return null;
+    const minFollowers = search.minFollowers;
+    if (minFollowers !== undefined && (dataset !== 'listings' || typeof minFollowers !== 'number' || !Number.isInteger(minFollowers) || minFollowers < 0 || minFollowers > 2_147_483_647)) return null;
+    const sort = search.sort;
+    const allowedSorts: Record<ChatDataset, readonly string[]> = { listings: ['followers', 'newest'], posts: ['newest', 'views'], catalog: ['title'] };
+    if (sort !== undefined && (typeof sort !== 'string' || !allowedSorts[dataset].includes(sort))) return null;
+    return { reply, action: { kind: 'search', dataset, q: typeof q === 'string' && q.trim() ? q.trim() : null,
+      ...(limit === undefined ? {} : { limit }),
+      ...(verified === undefined ? {} : { verified }),
+      ...(minFollowers === undefined ? {} : { minFollowers }),
+      ...(sort === undefined ? {} : { sort: sort as 'followers' | 'newest' | 'views' | 'title' }),
+    } };
   }
 
   if (kind === 'move') {

@@ -180,6 +180,10 @@ export interface PageMeta {
 interface PageQuery {
   q?: string | null;
   limit?: number;
+  cursor?: string | null;
+  verified?: boolean;
+  minFollowers?: number;
+  sort?: 'followers' | 'newest' | 'views' | 'title';
 }
 
 /** Rows a page holds when the caller does not ask for a size. */
@@ -193,10 +197,14 @@ const DEFAULT_PAGE_ROWS = 10;
  * seller mints it and the seller validates it. The selected rows determine
  * the price, so each page gets a fresh quote.
  */
-export function withQuery(path: string, params: { q?: string | null; cursor?: string | null } = {}): string {
+export function withQuery(path: string, params: PageQuery = {}): string {
   const search = new URLSearchParams();
   const q = params.q?.trim();
   if (q) search.set('q', q);
+  if (params.limit !== undefined) search.set('limit', String(params.limit));
+  if (params.verified !== undefined) search.set('verified', String(params.verified));
+  if (params.minFollowers !== undefined) search.set('minFollowers', String(params.minFollowers));
+  if (params.sort !== undefined) search.set('sort', params.sort);
   if (params.cursor) search.set('cursor', params.cursor);
   const suffix = search.toString();
   return suffix ? `${path}?${suffix}` : path;
@@ -209,6 +217,15 @@ function pageOf(trace: RequestTrace): PageMeta | undefined {
 function queryOf(trace: RequestTrace): string | null {
   const q = asRecord(asRecord(trace.body)?.query)?.q;
   return typeof q === 'string' && q ? q : null;
+}
+
+function searchOptionsOf(trace: RequestTrace): Pick<PageQuery, 'verified' | 'minFollowers' | 'sort'> {
+  const query = asRecord(asRecord(trace.body)?.query);
+  return {
+    ...(typeof query?.verified === 'boolean' ? { verified: query.verified } : {}),
+    ...(typeof query?.minFollowers === 'number' ? { minFollowers: query.minFollowers } : {}),
+    ...(typeof query?.sort === 'string' && ['followers', 'newest', 'views', 'title'].includes(query.sort) ? { sort: query.sort as PageQuery['sort'] } : {}),
+  };
 }
 
 /** `path` carries the query string; routing compares the path alone. */
@@ -292,12 +309,76 @@ function specForPath(path: string): EndpointSpec | undefined {
 /** Words that carry no search value on their own. */
 const FILLER = new Set([
   '&', 'a', 'about', 'all', 'an', 'and', 'any', 'are', 'browse', 'by', 'find', 'for', 'from', 'get', 'give',
-  'in', 'is', 'list', 'me', 'of', 'on', 'or', 'please', 'public', 'search', 'show', 'some', 'the', 'there',
+  'called', 'in', 'is', 'list', 'me', 'named', 'of', 'on', 'or', 'please', 'public', 'search', 'show', 'some', 'the', 'there',
   'to', 'what', 'with',
 ]);
 
+const COUNT_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+};
+const COUNT = '(\\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)';
+const RANK_COUNT = new RegExp(`\\b(?:top|first|latest|newest|best)\\s*${COUNT}\\b`, 'i');
+const ENTITY_COUNT = new RegExp(`\\b${COUNT}\\s+(?:(?:newest|latest|top|best|popular|most popular|most viewed|most followed|verified|unverified|public)\\s+)*(?:creators?|artists?|brands?|profiles?|users?|influencers?|posts?|videos?|clips?|tracks?|songs?|recordings?)\\b`, 'i');
+const FOLLOWER_THRESHOLD = /\b(at least|minimum|more than|over|above|with)\s+([\d,.]+)\s*([km])?\s+followers?\b/i;
+
+interface CreatorFilters {
+  verified?: boolean;
+  minFollowers?: number;
+}
+
+interface SearchOptions extends CreatorFilters {
+  sort?: PageQuery['sort'];
+}
+
+function requestedSort(text: string, dataset: DatasetId): PageQuery['sort'] | undefined {
+  if (dataset === 'listings') {
+    if (/\b(?:newest|latest|most recent|recently joined)\b/i.test(text)) return 'newest';
+    if (/\b(?:top|most followed|most popular|popular|biggest|highest follower)\b/i.test(text)) return 'followers';
+  }
+  if (dataset === 'posts') {
+    if (/\b(?:top|most viewed|most popular|popular|highest views)\b/i.test(text)) return 'views';
+    if (/\b(?:newest|latest|most recent)\b/i.test(text)) return 'newest';
+  }
+  if (dataset === 'catalog' && /\b(?:alphabetical|by title)\b/i.test(text)) return 'title';
+  return undefined;
+}
+
+function creatorFiltersFrom(text: string): CreatorFilters {
+  const verified = /\bunverified\b/i.test(text) ? false : /\bverified\b/i.test(text) ? true : undefined;
+  const match = FOLLOWER_THRESHOLD.exec(text);
+  const base = match ? Number(match[2]!.replaceAll(',', '')) : NaN;
+  const multiplier = match?.[3]?.toLowerCase() === 'm' ? 1_000_000 : match?.[3]?.toLowerCase() === 'k' ? 1_000 : 1;
+  const strict = match && ['more than', 'over', 'above'].includes(match[1]!.toLowerCase()) ? 1 : 0;
+  const minFollowers = base * multiplier + strict;
+  return {
+    ...(verified === undefined ? {} : { verified }),
+    ...(Number.isSafeInteger(minFollowers) && minFollowers >= 0 && minFollowers <= 2_147_483_647 ? { minFollowers } : {}),
+  };
+}
+
+/** Only numbers describing a result count become page sizes. Title numbers remain search terms. */
+export function requestedLimit(text: string): number | undefined {
+  const word = RANK_COUNT.exec(text)?.[1] ?? ENTITY_COUNT.exec(text)?.[1];
+  if (!word) return undefined;
+  const count = COUNT_WORDS[word.toLowerCase()] ?? Number(word);
+  return Number.isInteger(count) && count >= 1 ? count : undefined;
+}
+
+function searchInput(text: string, limit?: number, filters: CreatorFilters = {}, sort?: PageQuery['sort']): string {
+  let cleaned = limit === undefined ? text : text
+    .replace(RANK_COUNT, ' ')
+    .replace(ENTITY_COUNT, ' ')
+    .replace(/\b(?:top|first|latest|newest|best|most popular|most followed)\b/gi, ' ');
+  if (sort !== undefined) cleaned = cleaned.replace(/\b(?:top|first|latest|newest|best|most viewed|most popular|popular|most followed|highest views|most recent|recently joined|sorted by views|by title|alphabetical)\b/gi, ' ');
+  if (filters.minFollowers !== undefined) cleaned = cleaned.replace(FOLLOWER_THRESHOLD, ' ');
+  if (filters.verified !== undefined) cleaned = cleaned.replace(/\b(?:unverified|verified)\b/gi, ' ');
+  return cleaned;
+}
+
 const DATASET_WORDS: Record<DatasetId, string[]> = {
-  listings: ['account', 'accounts', 'artist', 'artists', 'creator', 'creators', 'handle', 'handles', 'listing', 'listings', 'profile', 'profiles', 'user', 'users'],
+  listings: ['account', 'accounts', 'artist', 'artists', 'brand', 'brands', 'creator', 'creators', 'handle', 'handles', 'influencer', 'influencers', 'listing', 'listings', 'profile', 'profiles', 'user', 'users'],
   posts: ['caption', 'captions', 'clip', 'clips', 'post', 'posts', 'video', 'videos'],
   catalog: ['album', 'albums', 'catalog', 'catalogue', 'isrc', 'music', 'song', 'songs', 'track', 'tracks'],
 };
@@ -338,7 +419,7 @@ export function searchTermFrom(text: string, ignore: readonly string[] = []): st
 }
 
 export type QueryPlan =
-  | { kind: 'search'; dataset: DatasetId; q: string | null; reason: string }
+  | { kind: 'search'; dataset: DatasetId; q: string | null; limit?: number; verified?: boolean; minFollowers?: number; sort?: PageQuery['sort']; reason: string }
   | { kind: 'move'; moveId: string };
 
 /**
@@ -364,11 +445,14 @@ export function planQuery(text: string, options: Move[]): QueryPlan | undefined 
 
   const dataset = datasetFor(query);
   if (dataset) {
-    const term = searchTermFrom(query, DATASET_WORDS[dataset]);
+    const limit = requestedLimit(query);
+    const filters = dataset === 'listings' ? creatorFiltersFrom(query) : {};
+    const sort = requestedSort(query, dataset);
+    const term = searchTermFrom(searchInput(query, limit, filters, sort), DATASET_WORDS[dataset]);
     const spec = DATASETS[dataset];
     return term
-      ? { kind: 'search', dataset, q: term, reason: `search ${spec.noun} for “${term}”` }
-      : { kind: 'search', dataset, q: null, reason: `list ${spec.noun}` };
+      ? { kind: 'search', dataset, q: term, ...(limit === undefined ? {} : { limit }), ...filters, ...(sort === undefined ? {} : { sort }), reason: `search ${spec.noun} for “${term}”` }
+      : { kind: 'search', dataset, q: null, ...(limit === undefined ? {} : { limit }), ...filters, ...(sort === undefined ? {} : { sort }), reason: `list ${spec.noun}` };
   }
 
   const byLabel = options.find((move) => lower.includes(move.label.toLowerCase()));
@@ -376,15 +460,17 @@ export function planQuery(text: string, options: Move[]): QueryPlan | undefined 
 
   // Anything else with a real word in it is a search over every public account,
   // which is the dataset a visitor usually means by a bare city or name.
-  const term = searchTermFrom(query);
-  if (term) return { kind: 'search', dataset: 'listings', q: term, reason: `search creators for “${term}”` };
+  const limit = requestedLimit(query);
+  const filters = creatorFiltersFrom(query);
+  const term = searchTermFrom(searchInput(query, limit, filters));
+  if (term || Object.keys(filters).length) return { kind: 'search', dataset: 'listings', q: term, ...(limit === undefined ? {} : { limit }), ...filters, reason: `search creators for “${term ?? ''}”` };
 
   const first = options[0];
   return first ? { kind: 'move', moveId: first.id } : undefined;
 }
 
 /** A search on one dataset, ready to run and to pay for. */
-function searchMove(dataset: DatasetId, q: string | null, label?: string, hint?: string, lead?: string): Move {
+function searchMove(dataset: DatasetId, q: string | null, label?: string, hint?: string, lead?: string, limit?: number, filters: SearchOptions = {}): Move {
   const spec = DATASETS[dataset];
   const reason = q ? `search ${spec.noun} for “${q}”` : `list ${spec.noun}`;
   return {
@@ -392,7 +478,30 @@ function searchMove(dataset: DatasetId, q: string | null, label?: string, hint?:
     label: label ?? (q ? `Search ${spec.noun} for “${q}”` : `List ${spec.noun}`),
     hint: hint ?? `${reason}. One cent per creator credited, and the cursor buys the next page the same way.`,
     group: 'discover',
-    run: (ctx, emit) => buy(ctx, emit, { spec, path: withQuery(spec.path, { q }), q, ...(lead ? { lead } : {}) }),
+    run: (ctx, emit) => buy(ctx, emit, { spec, path: withQuery(spec.path, { q, limit, ...filters }), q, ...(lead ? { lead } : {}) }),
+  };
+}
+
+function unsupportedRanking(text: string): Move | null {
+  const requested = requestedLimit(text);
+  if (requested !== undefined && requested > 200) {
+    return {
+      id: 'unsupported-page-size', label: text, group: 'discover',
+      async run(_ctx, emit) { emit({ kind: 'error', text: 'A page can return at most 200 rows. Ask for 200 or fewer.' }); return {}; },
+    };
+  }
+  const dataset = datasetFor(text);
+  let explanation: string | null = null;
+  if (dataset === 'catalog' && /\b(?:top\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)|most popular|most played|trending)\b/i.test(text)) {
+    explanation = 'The catalog has no public popularity ranking. You can search tracks by title, artist or ISRC.';
+  }
+  if (dataset === 'posts' && /\b(?:most liked|most shared|most commented|sort(?:ed)? by likes)\b/i.test(text)) {
+    explanation = 'Posts can be ordered by views or newest first. Likes and shares are shown on each row but are not sortable here.';
+  }
+  if (!explanation) return null;
+  return {
+    id: 'unsupported-ranking', label: text, group: 'discover',
+    async run(_ctx, emit) { emit({ kind: 'error', text: explanation }); return {}; },
   };
 }
 
@@ -410,6 +519,8 @@ export async function resolveMove(
   options: Move[],
   history: readonly { role: 'user' | 'agent'; text: string }[] = [],
 ): Promise<Move | undefined> {
+  const unsupported = unsupportedRanking(text);
+  if (unsupported) return unsupported;
   const fallback = () => interpretQuery(text, options);
   let plan: ChatPlan | null = null;
   try {
@@ -424,8 +535,25 @@ export async function resolveMove(
   if (!plan) return fallback();
 
   const action = plan.action;
+  const local = planQuery(text, options);
+  // A model that picks a browse chip or omits the count must not turn a clear
+  // "top 3 creators" request into the route's default ten-row page.
+  if (action.kind === 'move' && local?.kind === 'search' && (local.limit !== undefined || local.verified !== undefined || local.minFollowers !== undefined || local.sort !== undefined)) {
+    return searchMove(local.dataset, local.q, undefined, undefined, undefined, local.limit, local);
+  }
   if (action.kind === 'search') {
-    return searchMove(action.dataset as DatasetId, action.q, undefined, undefined, plan.reply ?? undefined);
+    const dataset = action.dataset as DatasetId;
+    const sameLocal = local?.kind === 'search' && local.dataset === dataset ? local : null;
+    const limit = sameLocal?.limit ?? action.limit;
+    const filters: SearchOptions = dataset === 'listings'
+      ? { ...(action.verified === undefined ? {} : { verified: action.verified }), ...(action.minFollowers === undefined ? {} : { minFollowers: action.minFollowers }),
+          ...(sameLocal?.verified === undefined ? {} : { verified: sameLocal.verified }), ...(sameLocal?.minFollowers === undefined ? {} : { minFollowers: sameLocal.minFollowers }) }
+      : {};
+    filters.sort = sameLocal?.sort ?? action.sort;
+    const q = sameLocal && (sameLocal.limit !== undefined || sameLocal.verified !== undefined || sameLocal.minFollowers !== undefined || sameLocal.sort !== undefined)
+      ? sameLocal.q
+      : action.q;
+    return searchMove(dataset, q, undefined, undefined, undefined, limit, filters);
   }
   // The model named one of the moves already on screen. Its own narration is
   // dropped here: every move has a line of its own, and saying both would be
@@ -439,9 +567,11 @@ export async function resolveMove(
  * chip can never mean two different things.
  */
 export function interpretQuery(text: string, options: Move[]): Move | undefined {
+  const unsupported = unsupportedRanking(text);
+  if (unsupported) return unsupported;
   const plan = planQuery(text, options);
   if (!plan) return undefined;
-  if (plan.kind === 'search') return searchMove(plan.dataset, plan.q);
+  if (plan.kind === 'search') return searchMove(plan.dataset, plan.q, undefined, undefined, undefined, plan.limit, plan);
   return options.find((move) => move.id === plan.moveId) ?? CORE_MOVES.find((move) => move.id === plan.moveId);
 }
 
@@ -1271,7 +1401,7 @@ function nextMoves(ctx: RunContext, trace: RequestTrace): Move[] {
       run: (innerCtx, emit) =>
         buy(innerCtx, emit, {
           spec,
-          path: withQuery(spec.path, { q, cursor }),
+          path: withQuery(spec.path, { q, cursor, limit: page?.limit, ...searchOptionsOf(trace) }),
           q,
         }),
     });

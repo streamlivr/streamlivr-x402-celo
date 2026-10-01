@@ -29,6 +29,34 @@ describe('parseChatInterpret', () => {
     });
   });
 
+  it('keeps the requested page size separate from the search term', () => {
+    const plan = parseChatInterpret(
+      '{"action":{"kind":"search","dataset":"listings","q":"Nigeria","limit":3}}',
+      moves,
+    );
+    expect(plan?.action).toEqual({ kind: 'search', dataset: 'listings', q: 'Nigeria', limit: 3 });
+    expect(CHAT_INTERPRET_SYSTEM).toContain('Never put N into q');
+  });
+
+  it('rejects invalid page sizes from a model', () => {
+    for (const limit of [0, -1, 201, 3.5, '3', null]) {
+      expect(parseChatInterpret(JSON.stringify({ action: { kind: 'search', dataset: 'listings', q: null, limit } }), moves)).toBeNull();
+    }
+  });
+
+  it('accepts creator filters and rejects them on other datasets', () => {
+    const action = { kind: 'search', dataset: 'listings', q: 'NG', limit: 3, verified: true, minFollowers: 1000 };
+    expect(parseChatInterpret(JSON.stringify({ action }), moves)?.action).toEqual(action);
+    expect(parseChatInterpret(JSON.stringify({ action: { ...action, dataset: 'posts' } }), moves)).toBeNull();
+    expect(parseChatInterpret(JSON.stringify({ action: { ...action, minFollowers: -1 } }), moves)).toBeNull();
+  });
+
+  it('accepts only rankings supported by the selected dataset', () => {
+    expect(parseChatInterpret(JSON.stringify({ action: { kind: 'search', dataset: 'posts', q: 'NG', limit: 3, sort: 'views' } }), moves)?.action)
+      .toEqual({ kind: 'search', dataset: 'posts', q: 'NG', limit: 3, sort: 'views' });
+    expect(parseChatInterpret(JSON.stringify({ action: { kind: 'search', dataset: 'catalog', q: null, sort: 'views' } }), moves)).toBeNull();
+  });
+
   it('reads a move action', () => {
     const plan = parseChatInterpret('{"reply":"Reading the price list.","action":{"kind":"move","moveId":"quote"}}', moves);
     expect(plan?.action).toEqual({ kind: 'move', moveId: 'quote' });

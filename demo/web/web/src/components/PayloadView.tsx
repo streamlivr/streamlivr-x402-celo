@@ -43,14 +43,27 @@ interface PageMeta {
  * would read as "that is all there is". The cursor is named, because it is the
  * thing the next chip pays for.
  */
-function PageNote({ page, noun, q }: { page?: PageMeta; noun: string; q?: string | null }) {
+interface AppliedSearch {
+  q?: string | null;
+  sort?: 'followers' | 'newest' | 'views' | 'title';
+  verified?: boolean;
+  minFollowers?: number;
+}
+
+function PageNote({ page, noun, query }: { page?: PageMeta; noun: string; query?: AppliedSearch }) {
   if (!page || typeof page.total !== 'number' || page.total === 0) return null;
   const returned = page.returned ?? 0;
+  const details = [
+    query?.verified === true ? 'verified' : query?.verified === false ? 'unverified' : null,
+    typeof query?.minFollowers === 'number' ? `${formatCount(query.minFollowers)}+ followers` : null,
+    query?.sort === 'followers' ? 'most followed first' : query?.sort === 'views' ? 'most viewed first' : query?.sort === 'newest' ? 'newest first' : null,
+  ].filter(Boolean);
   return (
     <p className="px-1 text-[12px] text-slate-500">
       <span className="tabular text-slate-400">{formatCount(returned)}</span> {returned === 1 ? noun.replace(/s$/, '') : noun} on this page ·{' '}
       <span className="tabular text-slate-400">{formatCount(page.total)}</span> total
-      {q ? <> matching “{q}”</> : null}
+      {query?.q ? <> matching “{query.q}”</> : null}
+      {details.length ? <> · {details.join(' · ')}</> : null}
       {page.hasMore ? '. Next page available.' : '. No more pages.'}
     </p>
   );
@@ -782,13 +795,16 @@ export function PayloadView({
   if (shape === 'creators') {
     const creators = (record.creators as CreatorRow[] | undefined) ?? [];
     const page = record.page as PageMeta | undefined;
-    const q = (record.query as { q?: string | null } | undefined)?.q ?? null;
+    const query = record.query as AppliedSearch | undefined;
+    const q = query?.q ?? null;
     if (creators.length === 0) {
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
           {q
-            ? `No public creator matches “${q}”. Try a username, a display name, or a two-letter country code.`
-            : 'No creator came back for this page.'}
+            ? `No public creator matches “${q}”. Try another name, tag or country, or relax the filters.`
+            : query?.verified !== undefined || query?.minFollowers !== undefined
+              ? 'No creators match these filters. Try lowering the follower minimum or changing the verification filter.'
+              : 'No creators came back for this page.'}
         </div>
       );
     }
@@ -799,7 +815,7 @@ export function PayloadView({
             <CreatorRowView key={creator.id ?? index} creator={creator} />
           ))}
         </div>
-        <PageNote page={page} noun="creators" q={q} />
+        <PageNote page={page} noun="creators" query={query} />
       </div>
     );
   }
@@ -807,7 +823,8 @@ export function PayloadView({
   if (shape === 'tracks') {
     const tracks = (record.tracks as TrackRow[] | undefined) ?? [];
     const page = record.page as PageMeta | undefined;
-    const q = (record.query as { q?: string | null } | undefined)?.q ?? null;
+    const query = record.query as AppliedSearch | undefined;
+    const q = query?.q ?? null;
     if (tracks.length === 0) {
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
@@ -825,7 +842,7 @@ export function PayloadView({
         {tracks.map((track, index) => (
           <TrackCard key={track.id ?? index} track={track} index={index} />
         ))}
-        <PageNote page={page} noun="tracks" q={q} />
+        <PageNote page={page} noun="tracks" query={query} />
       </div>
     );
   }
@@ -833,12 +850,13 @@ export function PayloadView({
   if (shape === 'posts') {
     const posts = (record.posts as PostRow[] | undefined) ?? [];
     const page = record.page as PageMeta | undefined;
-    const q = (record.query as { q?: string | null } | undefined)?.q ?? null;
+    const query = record.query as AppliedSearch | undefined;
+    const q = query?.q ?? null;
     if (posts.length === 0) {
       return (
         <div className="rounded-2xl border border-white/[0.08] bg-[#10131a]/85 p-4 text-[13px] leading-relaxed text-slate-400">
           {q
-            ? `No public post matches “${q}”. Titles, captions and tags are searched.`
+            ? `No public post matches “${q}”. Try another title, tag or creator country.`
             : 'No public posts came back from this page.'}
         </div>
       );
@@ -848,7 +866,7 @@ export function PayloadView({
         {posts.map((post, index) => (
           <PostCard key={post.id ?? index} post={post} index={index} />
         ))}
-        <PageNote page={page} noun="posts" q={q} />
+        <PageNote page={page} noun="posts" query={query} />
       </div>
     );
   }

@@ -51,9 +51,15 @@ describe('paid route catalog', () => {
 
   it('publishes search and pagination on every list route, and none on the profile', () => {
     const routes = buildPaidRoutes();
-    for (const route of routes.filter((entry) => ['creator-listings', 'public-posts', 'music-catalog'].includes(entry.id))) {
-      expect(route.queryParams?.map((param) => param.name)).toEqual(['q', 'limit', 'cursor']);
+    const expected: Record<string, string[]> = {
+      'creator-listings': ['q', 'limit', 'cursor', 'verified', 'minFollowers', 'sort'],
+      'public-posts': ['q', 'limit', 'cursor', 'sort'],
+      'music-catalog': ['q', 'limit', 'cursor'],
+    };
+    for (const route of routes.filter((entry) => expected[entry.id])) {
+      expect(route.queryParams?.map((param) => param.name)).toEqual(expected[route.id]);
       expect(examplePath(route)).toContain('?q=');
+      expect(examplePath(route)).not.toContain('cursor=');
     }
     expect(routes.find((route) => route.id === 'creator-profile')?.queryParams).toBeUndefined();
     expect(routes.find((route) => route.id === 'x402-ping')?.queryParams).toBeUndefined();
@@ -130,7 +136,9 @@ describe('MCP server card', () => {
   it('publishes search and pagination arguments on the list tools', () => {
     const listings = buildMcpTools(context).find((tool) => tool.name === 'creator_listings');
     const schema = listings?.inputSchema as { properties: Record<string, unknown>; required: string[] };
-    expect(Object.keys(schema.properties).sort()).toEqual(['cursor', 'limit', 'q']);
+    expect(Object.keys(schema.properties).sort()).toEqual(['cursor', 'limit', 'minFollowers', 'q', 'sort', 'verified']);
+    expect(schema.properties.verified).toMatchObject({ type: 'boolean' });
+    expect(schema.properties.minFollowers).toMatchObject({ type: 'integer' });
     expect(schema.required).toEqual([]);
   });
 });

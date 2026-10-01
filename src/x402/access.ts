@@ -80,6 +80,7 @@ export const CREATOR_PUBLIC_SELECT = {
   countryCode: true,
   isVerified: true,
   followerCount: true,
+  createdAt: true,
   followingCount: true,
 } as const;
 
@@ -126,8 +127,8 @@ export function searchTokens(q: string | null, maxTokens = 6): string[] {
  */
 const FILLER_WORDS = new Set([
   'a', 'all', 'an', 'and', 'any', 'are', 'at', 'be', 'by', 'can', 'do', 'does',
-  'find', 'for', 'from', 'get', 'give', 'i', 'in', 'is', 'it', 'its', 'list',
-  'look', 'looking', 'me', 'need', 'of', 'on', 'or', 'please', 'show', 'some',
+  'called', 'find', 'for', 'from', 'get', 'give', 'i', 'in', 'is', 'it', 'its', 'list',
+  'look', 'looking', 'me', 'named', 'need', 'of', 'on', 'or', 'please', 'show', 'some',
   'that', 'the', 'their', 'them', 'these', 'this', 'those', 'to', 'want', 'was',
   'were', 'what', 'when', 'where', 'which', 'who', 'whose', 'why', 'will',
   'with', 'you', 'your',
@@ -139,7 +140,7 @@ const FILLER_WORDS = new Set([
  * grammar, so the noun is dropped and the country is what is left.
  */
 const ENTITY_WORDS: Record<'creator' | 'post' | 'track', string[]> = {
-  creator: ['creator', 'creators', 'artist', 'artists', 'user', 'users', 'account', 'accounts', 'profile', 'profiles', 'people', 'person', 'singer', 'singers', 'musician', 'musicians'],
+  creator: ['creator', 'creators', 'artist', 'artists', 'brand', 'brands', 'influencer', 'influencers', 'user', 'users', 'account', 'accounts', 'profile', 'profiles', 'people', 'person', 'singer', 'singers', 'musician', 'musicians'],
   post: ['post', 'posts', 'video', 'videos', 'clip', 'clips', 'reel', 'reels'],
   // "music" is deliberately absent: it is a word in real titles ("Music & Me"),
   // and dropping it would turn a track search into a search for "&".

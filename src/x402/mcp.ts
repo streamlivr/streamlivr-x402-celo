@@ -95,7 +95,7 @@ function buildPath(route: PaidRoute, args: Record<string, unknown>): { path: str
   for (const param of route.queryParams ?? []) {
     const value = args[param.name];
     if (value === undefined || value === null || value === '') continue;
-    if (typeof value !== 'string' && typeof value !== 'number') continue;
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
     query.set(param.name, String(value));
   }
   const search = query.toString();

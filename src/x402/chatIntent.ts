@@ -21,11 +21,11 @@ export type ChatDataset = 'listings' | 'posts' | 'catalog';
 export const CHAT_DATASETS: Record<ChatDataset, { noun: string; fields: string }> = {
   listings: {
     noun: 'creator',
-    fields: 'username, display name, bio and country code',
+    fields: 'username, display name, bio, hashtag, country, follower count and verified status',
   },
   posts: {
     noun: 'post',
-    fields: 'title, caption, description and hashtags',
+    fields: 'title, caption, hashtag, public creator country and view count',
   },
   catalog: {
     noun: 'track',
@@ -44,6 +44,13 @@ export interface ChatSearchAction {
   kind: 'search';
   dataset: ChatDataset;
   q: string | null;
+  /** Rows requested for this page. The paid API caps this at 200. */
+  limit?: number;
+  /** Listings-only filters over public profile fields. */
+  verified?: boolean;
+  minFollowers?: number;
+  /** Only rankings the public API implements. */
+  sort?: 'followers' | 'newest' | 'views' | 'title';
 }
 
 export interface ChatMoveAction {
@@ -63,6 +70,7 @@ export interface ChatPlan {
 export const MAX_CHAT_MESSAGE_CHARS = 500;
 /** The search term the model returns is one or two words, never a paragraph. */
 export const MAX_CHAT_QUERY_CHARS = 80;
+export const MAX_CHAT_RESULT_LIMIT = 200;
 /** The spoken line is one sentence. Anything longer reads like a wall. */
 export const MAX_CHAT_REPLY_CHARS = 220;
 
@@ -87,14 +95,18 @@ export const CHAT_INTERPRET_SYSTEM = [
   `- catalog: the music catalog (${CHAT_DATASETS.catalog.fields}).`,
   '',
   'Answer with JSON only, in this shape:',
-  '{"reply":"one short sentence","action":{"kind":"search","dataset":"listings","q":"lagos"}}',
+  '{"reply":"one short sentence","action":{"kind":"search","dataset":"listings","q":"lagos","limit":3,"verified":true,"minFollowers":1000}}',
   'or',
   '{"reply":"one short sentence","action":{"kind":"move","moveId":"quote"}}',
   '',
   'Rules:',
   '- Pick a move when the request is about price, wallet, settlement, inventory or how x402 works.',
   '- Otherwise pick the dataset the request names. "creators in Nigeria" is listings, "amapiano posts" is posts, "Lagos Nights" is catalog.',
-  '- q is the search term alone. Drop filler words, the dataset word, and keep a country code if one is named.',
+  '- q is the search term alone. Drop filler words, ranking words such as "top", counts, and the dataset word. Keep a country name or code if one is named.',
+  '- When the visitor asks for N results, set limit to N (an integer from 1 to 200). Never put N into q. Omit limit when no count was requested.',
+  '- For listings, verified and minFollowers are optional filters. Use them only if the visitor asked for them. Strip those constraints out of q. minFollowers is a whole number from 0 to 2147483647.',
+  '- Sort listings by followers (default) or newest. Sort posts by newest (default) or views. Catalog is title order only. Set sort only when the visitor asks for that ranking.',
+  '- Listings are ranked by follower count; posts are newest first; tracks are alphabetical. Do not claim a ranking the API cannot provide.',
   '- Do not invent an id. Use only the ids in the move list.',
   '- The reply is one sentence, and it never names a model or a provider.',
 ].join('\n');
@@ -182,11 +194,26 @@ export function parseChatInterpret(raw: string, moves: readonly ChatMoveOption[]
   const kind = (action as Record<string, unknown>).kind;
 
   if (kind === 'search') {
-    const dataset = (action as Record<string, unknown>).dataset;
+    const search = action as Record<string, unknown>;
+    const dataset = search.dataset;
     if (!isDataset(dataset)) return null;
-    const qRaw = (action as Record<string, unknown>).q;
+    const qRaw = search.q;
     const q = typeof qRaw === 'string' && trimmed(qRaw) ? clip(trimmed(qRaw), MAX_CHAT_QUERY_CHARS) : null;
-    return { reply: sanitizeChatReply(record.reply), action: { kind: 'search', dataset, q } };
+    const limit = search.limit;
+    if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_CHAT_RESULT_LIMIT)) return null;
+    const verified = search.verified;
+    if (verified !== undefined && (dataset !== 'listings' || typeof verified !== 'boolean')) return null;
+    const minFollowers = search.minFollowers;
+    if (minFollowers !== undefined && (dataset !== 'listings' || typeof minFollowers !== 'number' || !Number.isInteger(minFollowers) || minFollowers < 0 || minFollowers > 2_147_483_647)) return null;
+    const sort = search.sort;
+    const allowedSorts: Record<ChatDataset, readonly string[]> = { listings: ['followers', 'newest'], posts: ['newest', 'views'], catalog: ['title'] };
+    if (sort !== undefined && (typeof sort !== 'string' || !allowedSorts[dataset].includes(sort))) return null;
+    return { reply: sanitizeChatReply(record.reply), action: { kind: 'search', dataset, q,
+      ...(limit === undefined ? {} : { limit }),
+      ...(verified === undefined ? {} : { verified }),
+      ...(minFollowers === undefined ? {} : { minFollowers }),
+      ...(sort === undefined ? {} : { sort: sort as NonNullable<ChatSearchAction['sort']> }),
+    } };
   }
 
   if (kind === 'move') {

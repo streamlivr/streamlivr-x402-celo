@@ -129,7 +129,7 @@ export function paymentRouteSummary(route: PaidRoute, context: DiscoveryContext)
     path: route.path,
     description: route.description,
     tags: [...route.tags, priceTag(route)],
-    queryParams: (route.queryParams ?? []).map((param) => ({ name: param.name, description: param.description, example: param.example })),
+    queryParams: (route.queryParams ?? []).map((param) => ({ name: param.name, description: param.description, example: param.example, type: param.type ?? 'string', ...(param.values ? { values: param.values } : {}) })),
     price: {
       amountAtomic: route.priceAtomic,
       amount: formatAtomic(route.priceAtomic),
@@ -254,7 +254,12 @@ export function buildMcpTools(context: DiscoveryContext): McpToolDefinition[] {
     // Search and pagination are part of the tool contract: an agent that cannot
     // see `q`/`cursor` would pay for the same first page forever.
     for (const param of route.queryParams ?? []) {
-      properties[param.name] = { type: 'string', description: param.description, examples: [param.example] };
+      properties[param.name] = {
+        type: param.type ?? 'string',
+        description: param.description,
+        examples: [param.type === 'integer' ? Number(param.example) : param.type === 'boolean' ? param.example === 'true' : param.example],
+        ...(param.values ? { enum: param.values } : {}),
+      };
     }
     const inputSchema = { type: 'object', properties, required, additionalProperties: false } as Record<string, unknown>;
     return {

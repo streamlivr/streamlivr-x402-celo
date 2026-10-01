@@ -26,6 +26,11 @@ export interface PageRequest {
   cursor: Record<string, string> | null;
   /** Normalised search text, or null when the caller did not search. */
   q: string | null;
+  /** Creator-only public profile filters. */
+  verified?: boolean;
+  minFollowers?: number;
+  /** A route-specific public ranking. Defaults depend on the dataset. */
+  sort?: 'followers' | 'newest' | 'views' | 'title';
 }
 
 export interface PageInfo {
@@ -75,11 +80,29 @@ export function readPageQuery(query: unknown, options: PageOptions): PageQueryRe
   const qText = (firstValue(raw.q) ?? '').trim();
   if (qText.length > 120) return { ok: false, error: 'q must be 120 characters or fewer' };
 
+  const verifiedText = firstValue(raw.verified);
+  if (verifiedText !== null && !['true', 'false'].includes(verifiedText)) {
+    return { ok: false, error: 'verified must be true or false' };
+  }
+  const minFollowersText = firstValue(raw.minFollowers);
+  if (minFollowersText !== null && (!/^\d+$/.test(minFollowersText) || Number(minFollowersText) > 2_147_483_647)) {
+    return { ok: false, error: 'minFollowers must be a non-negative whole number' };
+  }
+  const sortText = firstValue(raw.sort);
+  if (sortText !== null && !['followers', 'newest', 'views', 'title'].includes(sortText)) {
+    return { ok: false, error: 'sort is not supported' };
+  }
+
   const cursorText = (firstValue(raw.cursor) ?? '').trim();
   const cursor = cursorText ? decodeCursor(cursorText) : null;
   if (cursorText && !cursor) return { ok: false, error: 'cursor is not a cursor this API issued' };
 
-  return { ok: true, page: { limit, cursor, q: qText || null } };
+  return { ok: true, page: {
+    limit, cursor, q: qText || null,
+    ...(verifiedText === null ? {} : { verified: verifiedText === 'true' }),
+    ...(minFollowersText === null ? {} : { minFollowers: Number(minFollowersText) }),
+    ...(sortText === null ? {} : { sort: sortText as NonNullable<PageRequest['sort']> }),
+  } };
 }
 
 export function encodeCursor(values: Record<string, string | number>): string {
