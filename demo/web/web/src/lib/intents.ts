@@ -522,6 +522,14 @@ export async function resolveMove(
   const unsupported = unsupportedRanking(text);
   if (unsupported) return unsupported;
   const fallback = () => interpretQuery(text, options);
+  const local = planQuery(text, options);
+  // Plain requests for one named dataset are complete locally. Questions and
+  // requests involving several datasets still need the model to choose a call.
+  const named = (Object.keys(DATASET_WORDS) as DatasetId[]).filter((dataset) =>
+    DATASET_WORDS[dataset].some((word) => new RegExp(`\\b${word}\\b`, 'i').test(text)),
+  );
+  const needsInterpretation = /\b(?:which|who|why|how|what|can|could|would|should|tell|compare|recommend|similar|like)\b/i.test(text);
+  if (!needsInterpretation && local?.kind === 'search' && named.length === 1 && named[0] === local.dataset) return fallback();
   let plan: ChatPlan | null = null;
   try {
     plan = await interpretWithModel({
@@ -535,7 +543,6 @@ export async function resolveMove(
   if (!plan) return fallback();
 
   const action = plan.action;
-  const local = planQuery(text, options);
   // A model that picks a browse chip or omits the count must not turn a clear
   // "top 3 creators" request into the route's default ten-row page.
   if (action.kind === 'move' && local?.kind === 'search' && (local.limit !== undefined || local.verified !== undefined || local.minFollowers !== undefined || local.sort !== undefined)) {

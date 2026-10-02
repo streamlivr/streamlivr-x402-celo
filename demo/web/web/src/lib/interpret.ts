@@ -41,7 +41,7 @@ export interface InterpretMove {
 }
 
 /** How long to wait for the interpreter before reading the sentence locally. */
-const INTERPRET_TIMEOUT_MS = 9_000;
+const INTERPRET_TIMEOUT_MS = 4_000;
 
 const DATASETS: readonly ChatDataset[] = ['listings', 'posts', 'catalog'];
 

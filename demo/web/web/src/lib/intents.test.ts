@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { planQuery, requestedLimit, withQuery } from './intents';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { planQuery, requestedLimit, resolveMove, withQuery } from './intents';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('open-ended data requests', () => {
   it('turns top 3 creators into a three-row follower-ranked page', () => {
@@ -47,5 +49,23 @@ describe('open-ended data requests', () => {
     expect(planQuery('3 newest creators', [])).toMatchObject({ kind: 'search', dataset: 'listings', q: null, limit: 3, sort: 'newest' });
     expect(planQuery('3 most viewed posts', [])).toMatchObject({ kind: 'search', dataset: 'posts', q: null, limit: 3, sort: 'views' });
     expect(planQuery('3 most popular creators', [])).toMatchObject({ kind: 'search', dataset: 'listings', q: null, limit: 3, sort: 'followers' });
+  });
+
+  it('starts a clear paid search without waiting for the remote interpreter', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const move = await resolveMove('top 3 creators in Nigeria', []);
+    expect(move?.id).toBe('search:listings');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still interprets a question before choosing a dataset', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      plan: { reply: null, action: { kind: 'search', dataset: 'catalog', q: 'lagos nights' } },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const move = await resolveMove('Which creators made Lagos Nights?', []);
+    expect(move?.id).toBe('search:catalog');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

@@ -102,8 +102,8 @@ export function useChat(burnerKey: string) {
   );
 
   /**
-   * Release queued blocks one at a time, on a short beat so they do not stack
-   * up. A text block holds the queue until its typewriter reports back, which
+   * Release queued blocks as soon as they are ready. A text block holds the
+   * queue until its typewriter reports back, which
    * it may do before or after the next block is emitted. Testing the finished
    * record rather than the block kind is what keeps both orderings moving.
    */
@@ -119,8 +119,7 @@ export function useChat(burnerKey: string) {
     const index = active.revealed - 1;
     const current = index >= 0 ? active.blocks[index] : undefined;
     if (current && current.kind === 'text' && !streamedRef.current.has(`${active.id}:${index}`)) return;
-    const delay = index < 0 || current?.kind === 'text' ? 0 : 240;
-    const timer = setTimeout(() => advance(active.id), delay);
+    const timer = setTimeout(() => advance(active.id), 0);
     return () => clearTimeout(timer);
   }, [turns, advance, patchTurn]);
 

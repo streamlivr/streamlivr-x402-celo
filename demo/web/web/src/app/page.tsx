@@ -66,10 +66,9 @@ export default function AgentCheckoutPage() {
   const sessionSpent = useMemo(() => formatUsd(String(sessionSpentAtomic)), [sessionSpentAtomic]);
 
   /**
-   * Chips are short and always name a dataset, so the local reader resolves
-   * them with no round trip. A typed sentence goes to the seller's model first,
-   * with the last few turns as context, and falls back to the same local reader
-   * when the model is unavailable.
+   * Chips and clear typed searches resolve locally. Questions that need a
+   * choice of action go to the seller's model with recent turns as context.
+   * An unavailable model falls back to the local reader.
    */
   const findMove = (query: string): Move | undefined => interpretQuery(query, options);
 

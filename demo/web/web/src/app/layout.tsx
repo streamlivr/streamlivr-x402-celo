@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { API_BASE_URL } from '@/lib/config';
 
 export const metadata: Metadata = {
   title: 'Streamlivr x402: Agent Checkout Demo',
@@ -17,6 +18,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <link rel="preconnect" href={API_BASE_URL} crossOrigin="anonymous" />
+      </head>
       <body className="font-sans antialiased">
         {children}
       </body>
