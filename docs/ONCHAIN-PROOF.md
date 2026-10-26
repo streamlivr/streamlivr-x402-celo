@@ -128,16 +128,17 @@ Registered on Celo mainnet with the metadata document this repository serves at
 |---|---|---|
 | `register()` on the Identity Registry | `0x284db57aeb94b4eb60e950a2359d6480355ab29597de3a663879e7aac240debf` | [link](https://celo.blockscout.com/tx/0x284db57aeb94b4eb60e950a2359d6480355ab29597de3a663879e7aac240debf) |
 | `setAgentURI()` with the discovery services array | `0x9838bc18e52475029eae942f8222088e0391ff385122917134486f7e4c5e2e40` | [link](https://celo.blockscout.com/tx/0x9838bc18e52475029eae942f8222088e0391ff385122917134486f7e4c5e2e40) |
+| `setAgentURI()` adding the posts route, the OpenAPI document and the logo (26 October 2026, block `81108720`) | `0x091feb5290abbe533759510b3c094c495ff41be0a4314e22a6e660ace49e0b78` | [link](https://celo.blockscout.com/tx/0x091feb5290abbe533759510b3c094c495ff41be0a4314e22a6e660ace49e0b78) |
 
-Both transactions carry the `celo_afe6af2bc55d` ERC-8021 attribution suffix. The registry address is
+All three transactions carry the `celo_afe6af2bc55d` ERC-8021 attribution suffix. The registry address is
 `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` and the agent id is `9852`. Read it back with:
 
 ```
 npm run x402:agent-status
 ```
 
-The metadata lists seven services: the web app, the A2A card, the MCP endpoint, and one entry per
-paid route. Discovery documents are content addressed as a base64 `data:` URI on-chain, so the
+The current metadata lists nine services: the web app, the A2A card, the MCP endpoint, the OpenAPI
+document, and one entry per paid route. The logo is the spec `image` field. Discovery documents are content addressed as a base64 `data:` URI on-chain, so the
 record cannot be edited after the fact.
 
 ## Reputation

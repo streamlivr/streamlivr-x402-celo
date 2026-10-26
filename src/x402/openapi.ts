@@ -7,7 +7,7 @@
  * that OpenAPI has no field for travels in an `x-x402` extension on each paid
  * operation.
  */
-import { buildPaidRoutes, formatAtomic, type PaidRoute } from './catalog.js';
+import { buildPaidRoutes, formatAtomic, queryParamExample, queryParamSchema, type PaidRoute } from './catalog.js';
 import { MAX_REQUEST_PRICE_ATOMIC, PRICE_RULE } from './pricing.js';
 import { AGENT_DESCRIPTION, AGENT_DOCUMENTATION_URL, AGENT_NAME, AGENT_PROVIDER, AGENT_VERSION, type DiscoveryContext } from './discovery.js';
 
@@ -15,18 +15,6 @@ type Schema = Record<string, unknown>;
 
 const SUPPORT_EMAIL = 'support@streamlivr.com';
 const TERMS_URL = 'https://docs.streamlivr.com/legal/terms-of-service';
-
-function paramSchema(type: 'string' | 'integer' | 'boolean' | undefined, values?: string[]): Schema {
-  if (type === 'integer') return { type: 'integer', minimum: 0 };
-  if (type === 'boolean') return { type: 'boolean' };
-  return values ? { type: 'string', enum: values } : { type: 'string' };
-}
-
-function exampleValue(type: 'string' | 'integer' | 'boolean' | undefined, example: string): unknown {
-  if (type === 'integer') return Number(example);
-  if (type === 'boolean') return example === 'true';
-  return example;
-}
 
 const PAYMENT_REQUIRED_RESPONSE = {
   description:
@@ -48,8 +36,8 @@ function paidOperation(route: PaidRoute, context: DiscoveryContext): Schema {
       in: 'query',
       required: false,
       description: param.description,
-      schema: paramSchema(param.type, param.values),
-      example: exampleValue(param.type, param.example),
+      schema: queryParamSchema(param),
+      example: queryParamExample(param),
     })),
   ];
   return {

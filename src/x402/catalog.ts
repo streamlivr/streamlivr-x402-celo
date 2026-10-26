@@ -15,6 +15,7 @@
  * page costs more and a buyer that pages through the whole catalog pays for
  * each page as it arrives.
  */
+import type { DeclareQueryDiscoveryExtensionConfig } from '@x402/extensions';
 import { X402_PING_PRICE_ATOMIC } from './config.js';
 import { CREATOR_UNIT_PRICE_ATOMIC, FLOOR_REQUEST_PRICE_ATOMIC, PRICE_RULE } from './pricing.js';
 
@@ -303,6 +304,66 @@ export function routePattern(route: PaidRoute): string {
   return `GET ${route.path}`;
 }
 
+/** JSON Schema for one query parameter, shared by OpenAPI and the Bazaar declaration. */
+export function queryParamSchema(param: Pick<PaidRouteQueryParam, 'type' | 'values'>): Record<string, unknown> {
+  if (param.type === 'integer') return { type: 'integer', minimum: 0 };
+  if (param.type === 'boolean') return { type: 'boolean' };
+  return param.values ? { type: 'string', enum: param.values } : { type: 'string' };
+}
+
+/** The example value typed to match `queryParamSchema`. */
+export function queryParamExample(param: Pick<PaidRouteQueryParam, 'type' | 'example'>): unknown {
+  if (param.type === 'integer') return Number(param.example);
+  if (param.type === 'boolean') return param.example === 'true';
+  return param.example;
+}
+
+/**
+ * The query a discovery client can send as written. Only `q` and `limit`: the
+ * other examples are filters or a cursor that would narrow or break a first call.
+ */
+function exampleQueryParams(route: PaidRoute): PaidRouteQueryParam[] {
+  return (route.queryParams ?? []).filter((param) => param.name === 'q' || param.name === 'limit');
+}
+
+/** Example query values keyed by name, typed for the Bazaar `input` declaration. */
+export function exampleQuery(route: PaidRoute): Record<string, unknown> {
+  return Object.fromEntries(exampleQueryParams(route).map((param) => [param.name, queryParamExample(param)]));
+}
+
+/**
+ * The Bazaar declaration for a route: path and query parameters with their
+ * schemas, plus the example body. Without `inputSchema` the extension publishes
+ * `queryParams` with no properties and `additionalProperties: false`, which
+ * tells a crawler the route takes no search or paging input at all.
+ */
+export function discoveryDeclaration(route: PaidRoute): DeclareQueryDiscoveryExtensionConfig {
+  const queryParams = route.queryParams ?? [];
+  return {
+    ...(route.pathParam
+      ? {
+          pathParams: { [route.pathParam.name]: route.pathParam.example },
+          pathParamsSchema: {
+            type: 'object',
+            properties: { [route.pathParam.name]: { type: 'string', description: route.pathParam.description } },
+            required: [route.pathParam.name],
+          },
+        }
+      : {}),
+    ...(queryParams.length > 0
+      ? {
+          input: exampleQuery(route),
+          inputSchema: {
+            properties: Object.fromEntries(
+              queryParams.map((param) => [param.name, { ...queryParamSchema(param), description: param.description }]),
+            ),
+          },
+        }
+      : {}),
+    output: { example: route.example },
+  };
+}
+
 /**
  * Fills the `:param` segment with the example value and appends the example
  * query string, so discovery documents publish a URL a client can call as
@@ -312,8 +373,7 @@ export function examplePath(route: PaidRoute): string {
   const path = route.pathParam
     ? route.path.replace(`:${route.pathParam.name}`, route.pathParam.example)
     : route.path;
-  const query = (route.queryParams ?? [])
-    .filter((param) => param.name === 'q' || param.name === 'limit')
+  const query = exampleQueryParams(route)
     .map((param) => `${param.name}=${encodeURIComponent(param.example)}`).join('&');
   return query ? `${path}?${query}` : path;
 }
