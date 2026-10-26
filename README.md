@@ -355,6 +355,25 @@ can still leave a rating. `npm run x402:agent-status` reads the whole record bac
 One contract detail is easy to misread. `getSummary` on this deployment returns an average, not a
 sum. Two entries of `100` read back as count `2`, average `100`.
 
+## Where the API, MCP, and Agent Skills are listed globally
+
+Streamlivr's creator discovery APIs, Model Context Protocol (MCP) servers, and autonomous agent skills are publicly listed and discoverable across major AI registries, developer environments, and LLM marketplaces:
+
+| Ecosystem / Layer | Surface Name | Verified Status | Reference & Listing Link |
+| :--- | :--- | :---: | :--- |
+| **Official Global MCP Registry** | [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/)<br>*(Anthropic & Linux Foundation)* | 🟢 **LIVE & ACTIVE** | Published as [`io.github.StreamlivrApp/streamlivr@1.0.0`](https://registry.modelcontextprotocol.io/v0/servers?search=streamlivr). Resolves to `https://api.streamlivr.com/mcp`. |
+| **OpenAI & ChatGPT Ecosystem** | [ChatGPT Plugins / Custom MCP](https://chatgpt.com/plugins) | 🟢 **ACTIVE** | Installed and verified as remote MCP plugin. Turnkey Action schema available at `https://api.streamlivr.com/openapi.json`. |
+| **Developer IDE Extensions** | [Cursor Directory](https://cursor.directory/) | 🟢 **LIVE** | Live community plugin at [`cursor.directory/plugins/streamlivr`](https://cursor.directory/plugins/streamlivr). |
+| **Universal MCP Catalogs** | [Glama.ai](https://glama.ai/) | 🟢 **LIVE** | Live connector at [`glama.ai/mcp/connectors/com.streamlivr.api/streamlivr`](https://glama.ai/mcp/connectors/com.streamlivr.api/streamlivr). Verified Ownership, Healthy status, TDQS: 3.9/5.0. |
+| **Autonomous Celo Marketplaces** | [usebuy.ai](https://usebuy.ai/) *(Celo Buy Skill)* | 🟢 **LIVE** | Approved listing in `celo-org/buy-skill` for autonomous machine purchasing via `@celo/buy`. |
+| **On-Chain Agent Identity** | [Aigora.org](https://aigora.org/) *(ERC-8004)* | 🟢 **LIVE** | On-chain agent record on Celo Mainnet: [`aigora.org/services/42220_0x8004a..._9852`](https://aigora.org/services/42220_0x8004a169fb4a3325136eb29fa0ceb6d2e539a432_9852). |
+| **Open-Source LLMs & Multi-Modal** | [Agensi.io](https://www.agensi.io/) *(Meta Muse & Llama)* | 🟢 **LIVE** | Official skill listing at [`agensi.io/skills/streamlivr`](https://www.agensi.io/skills/streamlivr). |
+| **Decentralized x402 Crawlers** | [agent402.tools](https://agent402.tools/) & [x402.new](https://x402.new/) | 🤖 **INDEXED** | Automatically indexed via `extensions.bazaar` payload and `/.well-known/x402`. |
+| **Frontier LLM Agent Marketplace** | [xAI Grok Plugin Marketplace](https://github.com/xai-org/plugin-marketplace) | 🟡 **IN REVIEW** | Submitted via [PR #1684](https://github.com/xai-org/plugin-marketplace/pull/1684) (`feat(plugins): add Streamlivr MCP creator & music discovery plugin`). |
+| **Developer Coding Assistant** | [Cline Marketplace](https://marketplace.cline.bot/) | 🟡 **SUBMITTED** | Submission issue filed on `github.com/cline/mcp-marketplace`. |
+
+For setup snippets across Claude Desktop, Cursor, OpenAI/ChatGPT, and Python/TypeScript agents, see the complete [Global Distribution Guide](./docs/GLOBAL_DISTRIBUTION.md).
+
 ## On-chain proof
 
 Every hash from our own runs is listed with its explorer link in
