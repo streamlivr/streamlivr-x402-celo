@@ -14,5 +14,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*.ts", "demo/**/*.ts"],
-  "exclude": ["node_modules", "reference"]
+  "exclude": ["node_modules", "reference", "demo/web"]
 }

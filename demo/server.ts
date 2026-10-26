@@ -41,7 +41,7 @@ import {
   type HTTPRequestContext,
   type RoutesConfig,
 } from '@x402/core/server';
-import { decodePaymentResponseHeader } from '@x402/core/http';
+import { decodePaymentRequiredHeader, decodePaymentResponseHeader } from '@x402/core/http';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { bazaarResourceServerExtension, declareDiscoveryExtension } from '@x402/extensions';
 import { FastifyAdapter } from '../src/x402/fastifyAdapter.js';
@@ -56,6 +56,7 @@ import {
   X402_CHAIN_ID,
   X402_DISCOVERY,
   X402_ENABLED,
+  X402_ICON_URL,
   X402_NETWORK,
   X402_PAY_TO,
   X402_PUBLIC_BASE_URL,
@@ -87,6 +88,7 @@ import {
 } from '../src/x402/chatIntent.js';
 import { buildAgentCard, buildMcpServerCard, currentDiscoveryContext } from '../src/x402/discovery.js';
 import { createMcpHandler } from '../src/x402/mcp.js';
+import { buildOpenApiDocument } from '../src/x402/openapi.js';
 import { readReputation } from '../src/x402/reputation.js';
 import { calculateAttributionShares, CREATOR_SHARE_BPS, PLATFORM_SHARE_BPS } from '../src/x402/split.js';
 import {
@@ -654,8 +656,10 @@ const routeConfig: RoutesConfig = Object.fromEntries(
             : { amount: route.priceAtomic, asset: X402_ASSET_ADDRESS, extra: X402_ASSET_EXTRA },
         },
       ],
-      resource: `${discoveryContext.baseUrl}${examplePath(route)}`,
+      // No `resource`: x402 then reports the URL that was actually requested,
+      // so the invoice names the same query its amount was priced from.
       description: route.description,
+      iconUrl: X402_ICON_URL,
       mimeType: 'application/json',
       serviceName: route.serviceName,
       tags: route.tags,
@@ -715,6 +719,23 @@ function failureReasonFromHeaders(headers: Record<string, unknown> | undefined):
   try {
     const decoded = decodePaymentResponseHeader(text) as { success?: boolean; errorReason?: string };
     return decoded?.success === false ? decoded.errorReason ?? 'The payment was rejected' : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The x402 requirements from a 402's `PAYMENT-REQUIRED` header. v2 only sets
+ * the header and leaves the body `{}`, so they are repeated in the body for
+ * clients and validators that read JSON.
+ */
+function paymentRequiredFromHeaders(headers: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  const key = Object.keys(headers ?? {}).find((name) => name.toLowerCase() === 'payment-required');
+  const value = key ? headers?.[key] : undefined;
+  const text = Array.isArray(value) ? value[0] : value;
+  if (typeof text !== 'string' || !text) return null;
+  try {
+    return decodePaymentRequiredHeader(text) as unknown as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -947,6 +968,12 @@ async function main() {
     return { ...buildMcpServerCard(publicContext), paymentEnabled: X402_ENABLED };
   });
 
+  const openApi = buildOpenApiDocument({ ...publicContext, routes: buildPaidRoutes() });
+  app.get('/openapi.json', async (_request, reply) => {
+    reply.header('cache-control', 'public, max-age=300');
+    return openApi;
+  });
+
   /**
    * The same ledger in the shape the bundled browser demo renders. Production
    * serves these under `/api/v1/agent/demo`, so pointing `demo/web` at this
@@ -1168,15 +1195,21 @@ async function main() {
   app.addHook('onRequest', async (request, reply) => {
     const path = pathOf(request);
     if (request.method !== 'GET' || (!PAID_PATHS.has(path) && !path.startsWith('/api/v1/agent/creator/'))) return;
-    const adapter = new FastifyAdapter(request);
+    const adapter = new FastifyAdapter(request, discoveryContext.baseUrl);
     const paymentHeader = adapter.getHeader('payment-signature') ?? adapter.getHeader('x-payment');
     const result = await httpServer.processHTTPRequest({ adapter, path: adapter.getPath(), method: adapter.getMethod(), ...(paymentHeader ? { paymentHeader } : {}) });
     if (result.type === 'payment-error') {
       copyHeaders(reply, result.response.headers);
       const body = result.response.body;
       const empty = !body || (typeof body === 'object' && Object.keys(body as Record<string, unknown>).length === 0);
-      const reason = empty ? failureReasonFromHeaders(result.response.headers as Record<string, unknown> | undefined) : null;
-      reply.code(result.response.status).send(reason ? { error: 'payment_failed', reason } : body ?? {});
+      const headers = result.response.headers as Record<string, unknown> | undefined;
+      const reason = empty ? failureReasonFromHeaders(headers) : null;
+      const requirements = empty ? paymentRequiredFromHeaders(headers) : null;
+      reply.code(result.response.status).send(
+        reason
+          ? { error: 'payment_failed', reason, ...(requirements ? { accepts: requirements.accepts } : {}) }
+          : requirements ?? body ?? {},
+      );
       return;
     }
     if (result.type === 'payment-verified') {

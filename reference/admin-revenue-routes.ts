@@ -8,7 +8,7 @@
  *   • Gift platform fees , our 10% ($LIVR) / 30% (USDT + USDC) cut of gifts
  *   • Pro subscriptions  , MRR from active PRO_MONTHLY / PRO_YEARLY
  *   • Algorithm boosts   , amountPaidUsd on ContentBoosts (paid feed influence)
- *   • Ads / withdrawal fees, placeholder lines (revenue streams land later)
+ *   • Ads                , AdMob estimated earnings (AdRevenueDaily, Pacific days)
  *
  *   GET /overview?days=30  , headline numbers + breakdowns
  *   GET /timeseries?days=30, daily revenue series (from PlatformDailyRollup)
@@ -18,6 +18,7 @@ import { SubscriptionStatus, UserRole, type KycStatus } from '@prisma/client';
 import { prisma } from '../../config/database.js';
 import { adminAuth } from '../../middleware/adminAuth.js';
 import { LIVR_PRICE_USD } from '../../services/tvlService.js';
+import { reportDate, shiftDate } from '../../services/adRevenue.js';
 import { kycSource, PAYOUT_BLOCKER_TEXT, payoutBlockers, type PayoutBlocker } from '../../x402/kyc.js';
 
 // $/month list price per plan. Pro is $7/mo (PRD); yearly billed at ~10 months.
@@ -46,6 +47,21 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
     const { since, to, days } = parseRange(request.query);
 
     const inRange = { gte: since, lte: to };
+    // AdMob earnings land per Pacific day (the only zone its API reports in):
+    // the `days` Pacific days ending today. `.then` starts the query now (a
+    // bare PrismaPromise is lazy) so it runs alongside the queries below.
+    const adsEnd = reportDate(to);
+    const adsRangeQuery = prisma.adRevenueDaily
+      .aggregate({
+        where: {
+          date: {
+            gte: new Date(`${shiftDate(adsEnd, -(days - 1))}T00:00:00Z`),
+            lte: new Date(`${adsEnd}T00:00:00Z`),
+          },
+        },
+        _sum: { estimatedEarningsMicros: true, impressions: true },
+      })
+      .then((r) => r);
     const [
       giftFees,
       activeSubs,
@@ -189,7 +205,9 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
     // Headline platform revenue counts settled mainnet money only. Sepolia
     // volume is test data and must not inflate it.
     const x402PlatformUsd = Number(x402Mainnet.gross - x402Mainnet.creator) / 1_000_000;
-    const totalRevenueUsd = giftFeesUsd + subscriptionsUsd + boostsUsd + rampFeesUsd + x402PlatformUsd;
+    const adsRange = await adsRangeQuery;
+    const adsUsd = Number(adsRange._sum.estimatedEarningsMicros ?? 0) / 1_000_000;
+    const totalRevenueUsd = giftFeesUsd + subscriptionsUsd + boostsUsd + rampFeesUsd + x402PlatformUsd + adsUsd;
 
     return {
       rangeDays: days,
@@ -200,6 +218,7 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
           subscriptionsUsd,
           boostsUsd,
           rampFeesUsd,
+          adsUsd,
           x402GrossUsd: Number(x402Atomic) / 1_000_000,
           x402PlatformUsd,
         },
@@ -293,10 +312,12 @@ export const adminRevenueRoutes: FastifyPluginAsync = async (app) => {
           count: r._count._all,
         })),
       },
+      ads: {
+        earningsInRangeUsd: adsUsd,
+        impressionsInRange: adsRange._sum.impressions ?? 0,
+      },
       // Revenue streams not yet wired, surfaced so the page shows the full P&L shape.
-      pending: [
-        { key: 'ads', label: 'Advertising', note: 'Sponsored feed placements (coming later)' },
-      ],
+      pending: [],
       generatedAt: new Date().toISOString(),
     };
   });

@@ -58,6 +58,15 @@ async function main() {
     chainId: X402_CHAIN_ID,
     networkName: erc8004NetworkFor(X402_CHAIN_ID),
   });
+  // The base URL comes from X402_PUBLIC_BASE_URL or API_PUBLIC_URL, and a local
+  // .env often points the latter at a tunnel. A mainnet record is permanent and
+  // public, so it must name a real HTTPS host. --allow-any-host overrides.
+  if (chain === celo && !process.argv.includes('--allow-any-host')) {
+    const host = new URL(context.baseUrl).hostname;
+    if (!context.baseUrl.startsWith('https://') || /^(localhost|127\.|10\.|192\.168\.)/.test(host) || /ngrok|trycloudflare|loca\.lt/.test(host)) {
+      throw new Error(`Refusing to write ${context.baseUrl} into the mainnet agent record. Set X402_PUBLIC_BASE_URL=https://api.streamlivr.com, or pass --allow-any-host.`);
+    }
+  }
   const metadata = buildAgentMetadata({ ...context, ...(process.env.AGENT_IMAGE ? { image: process.env.AGENT_IMAGE } : {}) });
   const agentURI = toDataUri(metadata);
   const registry = ERC8004_CONTRACTS[erc8004NetworkFor(X402_CHAIN_ID)].identityRegistry;

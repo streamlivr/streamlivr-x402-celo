@@ -8,7 +8,7 @@
   "scripts": {
     "demo": "tsx demo/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run src",
     "x402:buyer-smoke": "tsx src/scripts/x402-buyer-smoke.ts",
     "x402:give-feedback": "tsx src/scripts/x402-give-feedback.ts",
     "x402:agent-status": "tsx src/scripts/celo-agent-status.ts",

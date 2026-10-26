@@ -11,7 +11,15 @@ const PLACEHOLDER_ORIGIN = 'http://streamlivr.local';
  * it in its own module lets the public reference server reuse it unchanged.
  */
 export class FastifyAdapter implements HTTPAdapter {
-  constructor(private readonly request: FastifyRequest) {}
+  /**
+   * `publicOrigin` is the origin buyers actually call. x402 reports `getUrl()`
+   * as the resource in a 402, so without it the invoice would name the
+   * placeholder host instead of the URL that was requested.
+   */
+  constructor(
+    private readonly request: FastifyRequest,
+    private readonly publicOrigin: string = PLACEHOLDER_ORIGIN,
+  ) {}
 
   getHeader(name: string): string | undefined {
     const value = this.request.headers[name.toLowerCase()];
@@ -27,7 +35,8 @@ export class FastifyAdapter implements HTTPAdapter {
   }
 
   getUrl(): string {
-    return this.url().toString();
+    const url = this.url();
+    return `${this.publicOrigin.replace(/\/+$/, '')}${url.pathname}${url.search}`;
   }
 
   getAcceptHeader(): string {

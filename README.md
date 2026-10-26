@@ -100,6 +100,7 @@ npm run demo       # seller on http://127.0.0.1:3000
 | `GET /api/v1/agent/stats` | free | How many creators, posts and tracks there are, and the busiest tags | none |
 | `GET /.well-known/agent.json` | free | A2A agent card with prices and the ERC-8004 identity | none |
 | `GET /.well-known/mcp.json` | free | MCP server card listing the same routes as tools | none |
+| `GET /openapi.json` | free | OpenAPI 3.1 document for every route, with x402 pricing per operation | none |
 | `POST /mcp` | paid per tool | MCP JSON-RPC, same prices as the HTTP routes | same as the route called |
 | `GET /api/v1/agent/reputation` | free | On-chain ERC-8004 reputation plus settled volume | none |
 | `GET /healthz` | free | Process health | none |
@@ -196,10 +197,14 @@ never selected, at any price. `src/x402/access.ts` is the rule, in one file, wit
 Amounts are strings in token base units. Every supported asset uses 6 decimals, so `10000` is one
 cent.
 
-Ask for a paid route without paying, and the terms come back in the `payment-required` header. In
-x402 v2 the body is empty and the invoice is base64 encoded in that header:
+Ask for a paid route without paying, and the terms come back in the `payment-required` header,
+base64 encoded as x402 v2 specifies. x402 v2 leaves the body empty, which clients and validators that
+read JSON see as an invoice with nothing in it, so the server repeats the same object as the JSON
+body:
 
 ```bash
+curl -s http://127.0.0.1:3000/api/v1/agent/catalog | jq
+# or decode the header, which carries the identical object:
 curl -sD - -o /dev/null http://127.0.0.1:3000/api/v1/agent/catalog \
   | awk 'tolower($1) == "payment-required:" { print $2 }' \
   | base64 -d | jq
@@ -211,12 +216,13 @@ curl -sD - -o /dev/null http://127.0.0.1:3000/api/v1/agent/catalog \
   "resource": {
     "url": "https://api.streamlivr.com/api/v1/agent/catalog",
     "serviceName": "streamlivr-catalog",
-    "tags": ["x402", "celo", "music", "catalog"]
+    "tags": ["x402", "celo", "music", "catalog"],
+    "iconUrl": "https://streamlivr.com/assets/STREAMLIVR%20ICON%20(1).png"
   },
   "accepts": [{
     "scheme": "exact",
     "network": "eip155:42220",
-    "maxTimeoutSeconds": 60,
+    "maxTimeoutSeconds": 120,
     "payTo": "0xYourCeloWallet",
     "amount": "10000",
     "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
@@ -224,6 +230,9 @@ curl -sD - -o /dev/null http://127.0.0.1:3000/api/v1/agent/catalog \
   }]
 }
 ```
+
+`resource.url` is the URL that was requested, query string included, so the invoice names the same
+page its `amount` was priced from.
 
 The `extra` block is the EIP-712 domain the buyer signs over. Get `name` or `version` wrong and the
 facilitator refuses the payment, which is why those values live in `src/x402/config.ts` instead of
@@ -311,6 +320,11 @@ curl -s localhost:3000/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+`GET /openapi.json` is an OpenAPI 3.1 document built from the same route catalog: every paid path
+with its parameters, examples and 402 response, plus an `x-x402` block per operation with the
+network, asset, receiving wallet, facilitator and the minimum and maximum price. Import it into any
+API directory or client generator.
+
 `tools/list` returns only the fields the MCP spec defines, because strict clients reject unknown
 keys. Call a tool with no payment and you get the x402 challenge back instead of an error. Pay it,
 then repeat the call with the base64 payment payload under `params._meta["x402/payment"]`.
@@ -320,8 +334,9 @@ with the caller's payment header attached, so verification, settlement, attribut
 protection all run through one path. There is no way to reach creator data through MCP without
 paying.
 
-The agent is registered on Celo mainnet as id `9852`. Its on-chain metadata lists seven services:
-the web app, the A2A card, the MCP endpoint, and one entry per paid route. Route entries keep their
+The agent is registered on Celo mainnet as id `9852`. Its on-chain metadata lists nine services:
+the web app, the A2A card, the MCP endpoint, the OpenAPI document, and one entry per paid route. The
+logo is written as the spec `image` field. Route entries keep their
 path parameters as `{id}` templates, since a concrete creator id would become a dead link the
 moment that creator left the catalog.
 

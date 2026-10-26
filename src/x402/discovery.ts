@@ -18,6 +18,7 @@ import {
   X402_ASSET_SYMBOL,
   X402_CHAIN_ID,
   X402_FACILITATOR_URL,
+  X402_ICON_URL,
   X402_NETWORK,
   X402_PAY_TO,
   X402_SITE_URL,
@@ -32,6 +33,8 @@ export const AGENT_DESCRIPTION =
   'Streamlivr sells African and global creator, brand, music, content and platform metadata over x402 on Celo. Agents can search and page through public creator and brand profiles, public content and the music catalog, at one cent per creator credited. Every settled payment is attributed back to the creators whose rows were served: a post pays whoever owns its audio rather than whoever posted it, a recording pays the artist who owns it rather than the accounts that used it, and a row with no Streamlivr owner is retained by the platform.';
 export const AGENT_PROVIDER = { organization: 'Streamlivr', url: 'https://streamlivr.com' };
 export const AGENT_DOCUMENTATION_URL = 'https://github.com/streamlivr/streamlivr-x402-celo';
+/** Where the OpenAPI document for the agent routes is served. */
+export const OPENAPI_PATH = '/openapi.json';
 
 export interface DiscoveryContext {
   /** Public origin the API is reachable at, without a trailing slash. */
@@ -50,6 +53,8 @@ export interface DiscoveryContext {
   routes?: PaidRoute[];
   /** Public URL of the web app, when it differs from the API origin. */
   siteUrl?: string;
+  /** Square logo URL for directories and the ERC-8004 `image` field. */
+  iconUrl?: string;
 }
 
 /**
@@ -81,6 +86,7 @@ export function currentDiscoveryContext(overrides: Partial<DiscoveryContext> = {
     payTo: overrides.payTo ?? X402_PAY_TO ?? '',
     facilitatorUrl: overrides.facilitatorUrl ?? X402_FACILITATOR_URL,
     siteUrl: overrides.siteUrl ?? X402_SITE_URL ?? AGENT_PROVIDER.url,
+    iconUrl: overrides.iconUrl ?? X402_ICON_URL,
     ...(overrides.routes ? { routes: overrides.routes } : {}),
   };
 }
@@ -157,11 +163,13 @@ export function buildAgentCard(context: DiscoveryContext): Record<string, unknow
     name: AGENT_NAME,
     description: AGENT_DESCRIPTION,
     url: context.baseUrl,
+    ...(context.iconUrl ? { iconUrl: context.iconUrl } : {}),
     preferredTransport: 'HTTP+JSON',
     additionalInterfaces: [{ url: context.baseUrl, transport: 'HTTP+JSON' }],
     version: AGENT_VERSION,
     provider: AGENT_PROVIDER,
     documentationUrl: AGENT_DOCUMENTATION_URL,
+    openapiUrl: `${context.baseUrl}${OPENAPI_PATH}`,
     capabilities: {
       streaming: false,
       pushNotifications: false,
@@ -265,7 +273,11 @@ export function buildMcpTools(context: DiscoveryContext): McpToolDefinition[] {
     return {
       name: route.id.replace(/-/g, '_'),
       title: route.title,
-      description: `${route.description} Paid route: ${context.assetSymbol} ${formatAtomic(route.priceAtomic)} per creator credited, one cent minimum and ${formatAtomic(MAX_REQUEST_PRICE_ATOMIC)} maximum, settled over x402 on Celo. Without a payment the call returns the x402 payment requirements instead of data, and the requirements carry the exact amount for the page that was asked for.`,
+      description: `${route.description} ${
+        route.queryParams
+          ? `Paid route: ${context.assetSymbol} ${formatAtomic(route.priceAtomic)} per creator credited, one cent minimum and ${formatAtomic(MAX_REQUEST_PRICE_ATOMIC)} maximum, settled over x402 on Celo.`
+          : `Paid route: ${context.assetSymbol} ${formatAtomic(route.priceAtomic)} per request, settled over x402 on Celo.`
+      } Without a payment the call returns the x402 payment requirements instead of data, and the requirements carry the exact amount for the call that was asked for.`,
       inputSchema,
       annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false, destructiveHint: false },
       x402: {
@@ -291,7 +303,7 @@ export function buildMcpTools(context: DiscoveryContext): McpToolDefinition[] {
 /** MCP server card published at `/.well-known/mcp.json`. */
 export function buildMcpServerCard(context: DiscoveryContext): Record<string, unknown> {
   return {
-    serverInfo: { name: 'streamlivr-x402', version: AGENT_VERSION, title: `${AGENT_NAME} x402 agent tools` },
+    serverInfo: { name: 'streamlivr-x402', version: AGENT_VERSION, title: `${AGENT_NAME} x402 agent tools`, ...(context.iconUrl ? { icons: [{ src: context.iconUrl, mimeType: 'image/png' }] } : {}) },
     protocolVersion: MCP_PROTOCOL_VERSION,
     description: AGENT_DESCRIPTION,
     transport: { type: 'streamable-http', url: `${context.baseUrl}/mcp` },
@@ -308,6 +320,7 @@ export function buildMcpServerCard(context: DiscoveryContext): Record<string, un
     },
     provider: AGENT_PROVIDER,
     documentationUrl: AGENT_DOCUMENTATION_URL,
+    openapiUrl: `${context.baseUrl}${OPENAPI_PATH}`,
     tools: buildMcpTools(context),
   };
 }
@@ -334,6 +347,7 @@ export function buildAgentMetadata(options: AgentMetadataOptions): Record<string
     { name: 'web', endpoint: options.siteUrl ?? AGENT_PROVIDER.url },
     { name: 'A2A', endpoint: `${options.baseUrl}/.well-known/agent.json` },
     { name: 'MCP', endpoint: `${options.baseUrl}/mcp` },
+    { name: 'OpenAPI', endpoint: `${options.baseUrl}${OPENAPI_PATH}` },
     // Path parameters stay as `{id}` templates on-chain: a concrete id would
     // turn into a dead link the moment that record is removed.
     ...routes.map((route) => ({
@@ -347,7 +361,7 @@ export function buildAgentMetadata(options: AgentMetadataOptions): Record<string
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
     name: AGENT_NAME,
     description: AGENT_DESCRIPTION,
-    ...(options.image ? { image: options.image } : {}),
+    ...((options.image ?? options.iconUrl) ? { image: options.image ?? options.iconUrl } : {}),
     services,
     supportedTrust: ['reputation'],
     active: true,

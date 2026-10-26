@@ -43,6 +43,14 @@ Nine settlements on Celo mainnet, all on 18 September 2026. Each one came from
 Total settled: `75000` atomic units, which is `0.075` USDC. One buyer wallet, nine requests, every
 route on this repository paid at least once.
 
+The creator profile rows (`5000`) predate the current price rule. Every route now costs at least
+one cent (`10000`), and the list routes cost one cent per creator credited.
+
+These nine are the ones we ran and recorded by hand. The running total, including payments from
+wallets we do not hold, is served live by `GET https://api.streamlivr.com/api/v1/agent/reputation`
+under `settlements`. On 25 October 2026 it read 78 settlements, `1785000` atomic units (`1.785`
+USDC), from 3 distinct payers.
+
 Settlements 1 to 7 were the first mainnet run, right after the network switch. Rows 8 and 9 were
 repeated after the discovery extension and the reputation feedback shipped, to prove those changes
 did not disturb the payment path.

@@ -143,6 +143,21 @@ describe('MCP server card', () => {
   });
 });
 
+describe('MCP tool pricing text', () => {
+  const tools = buildMcpTools(context);
+
+  it('prices the ping tool per request, not per creator', () => {
+    const ping = tools.find((tool) => tool.name === 'x402_ping')!;
+    expect(ping.description).toContain('per request');
+    expect(ping.description).not.toContain('per creator credited, one cent minimum');
+  });
+
+  it('prices the list tools per creator credited with the ceiling', () => {
+    const listings = tools.find((tool) => tool.name === 'creator_listings')!;
+    expect(listings.description).toContain('per creator credited, one cent minimum and 2 maximum');
+  });
+});
+
 describe('ERC-8004 registration metadata', () => {
   const metadata = buildAgentMetadata(context) as Record<string, any>;
 
@@ -176,6 +191,18 @@ describe('ERC-8004 registration metadata', () => {
     expect(Object.keys(metadata).sort()).toEqual(['active', 'description', 'name', 'registrations', 'services', 'supportedTrust', 'type', 'x402Support']);
     expect(metadata.registrations[0].agentRegistry).toBe('eip155:42220:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432');
     expect(metadata.supportedTrust).toContain('reputation');
+  });
+
+  it('lists the OpenAPI document as a service', () => {
+    const byName = Object.fromEntries(metadata.services.map((service: any) => [service.name, service.endpoint]));
+    expect(byName.OpenAPI).toBe('https://api.example.com/openapi.json');
+  });
+
+  it('writes the icon as the spec image field when one is configured', () => {
+    const withIcon = buildAgentMetadata({ ...context, iconUrl: 'https://cdn.example.com/icon.png' }) as Record<string, any>;
+    expect(withIcon.image).toBe('https://cdn.example.com/icon.png');
+    const explicit = buildAgentMetadata({ ...context, iconUrl: 'https://cdn.example.com/icon.png', image: 'ipfs://logo' }) as Record<string, any>;
+    expect(explicit.image).toBe('ipfs://logo');
   });
 
   it('encodes metadata as a base64 data URI', () => {

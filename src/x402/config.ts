@@ -150,6 +150,14 @@ export const x402Env = z.object({
     .transform((v) => v === 'true' || v === '1'),
   /** Public home page for the agent provider, used in the A2A agent card. */
   X402_SITE_URL: optionalText,
+  /**
+   * Square logo for directories. Published as `iconUrl` in every 402 and in the
+   * agent cards, and written as `image` in the ERC-8004 registration.
+   */
+  X402_ICON_URL: z.preprocess(
+    blankToUndefined,
+    z.string().trim().url().default('https://streamlivr.com/assets/STREAMLIVR%20ICON%20(1).png'),
+  ),
 });
 
 const parsed = x402Env.parse(process.env);
@@ -193,6 +201,7 @@ export const X402_ATTRIBUTION_TAG = parsed.X402_ATTRIBUTION_TAG;
 export const X402_LOCAL_KYC_OVERRIDE = parsed.X402_LOCAL_KYC_OVERRIDE;
 export const X402_PUBLIC_BASE_URL = parsed.X402_PUBLIC_BASE_URL;
 export const X402_SITE_URL = parsed.X402_SITE_URL;
+export const X402_ICON_URL = parsed.X402_ICON_URL;
 export const X402_DISCOVERY = parsed.X402_DISCOVERY;
 export const ERC8004_AGENT_ID = parsed.ERC8004_AGENT_ID;
 
